@@ -2,7 +2,16 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { DOC_TYPE_LABEL, type DocDetail, type DocType, type ItemRow, type PartnerRow, type WarehouseRow } from '@shared/dto'
+import {
+  DOC_TYPE_LABEL,
+  type DocDetail,
+  type DocSummary,
+  type DocType,
+  type ItemRow,
+  type PartnerRow,
+  type ReturnableLine,
+  type WarehouseRow,
+} from '@shared/dto'
 import { call } from '../../api'
 import { showError } from '../../api/errors'
 import { useSessionStore } from '../../stores/session'
@@ -15,8 +24,8 @@ interface EditLine {
   serialManaged: boolean
   qty: number
   unitPrice: string
-  /** 已过账单据的行成本（分）；仅老板可见，编辑时不提交。 */
   costAmount: number | null
+  refLineId: number | null
   serials: string[]
   serialInput: string
   remark: string
@@ -30,11 +39,15 @@ const docType = computed(() => route.params['type'] as DocType)
 const docIdParam = computed(() => route.params['id'] as string)
 const isNew = computed(() => docIdParam.value === 'new')
 const title = computed(() => DOC_TYPE_LABEL[docType.value] ?? '单据')
+const isTransfer = computed(() => docType.value === 'TRANSFER')
+const isReturn = computed(() => docType.value === 'PURCHASE_RETURN' || docType.value === 'SALE_RETURN')
+const origDocType = computed(() => (docType.value === 'PURCHASE_RETURN' ? 'PURCHASE' : 'SALE'))
 
 const warehouses = ref<WarehouseRow[]>([])
 const partners = ref<PartnerRow[]>([])
-const itemKeyword = ref('')
 const itemOptions = ref<ItemRow[]>([])
+const origDocs = ref<DocSummary[]>([])
+const returnable = ref<ReturnableLine[]>([])
 
 const form = reactive({
   id: undefined as number | undefined,
@@ -42,16 +55,21 @@ const form = reactive({
   status: 'draft' as 'draft' | 'posted',
   bizDate: today(),
   warehouseId: undefined as number | undefined,
+  toWarehouseId: undefined as number | undefined,
   partnerId: undefined as number | undefined,
+  refDocId: undefined as number | undefined,
   remark: '',
   lines: [] as EditLine[],
 })
 const loaded = ref(false)
 const saving = ref(false)
+const serialFind = ref('')
 
-const partnerKind = computed(() => (docType.value === 'PURCHASE' ? 'supplier' : 'customer'))
-const canEdit = computed(() => isNew.value || form.status === 'draft' || session.isOwner)
+const partnerKind = computed(() =>
+  docType.value === 'PURCHASE' || docType.value === 'PURCHASE_RETURN' ? 'supplier' : 'customer',
+)
 const readOnlyPosted = computed(() => form.status === 'posted' && !isNew.value)
+const lockedPrice = computed(() => isTransfer.value || isReturn.value)
 
 function emptyLine(): EditLine {
   return {
@@ -62,6 +80,7 @@ function emptyLine(): EditLine {
     qty: 1,
     unitPrice: '0.00',
     costAmount: null,
+    refLineId: null,
     serials: [],
     serialInput: '',
     remark: '',
@@ -70,17 +89,75 @@ function emptyLine(): EditLine {
 
 async function loadMeta(): Promise<void> {
   warehouses.value = await call('warehouse:list', {})
-  partners.value = await call('partner:list', { kind: partnerKind.value })
+  if (!isTransfer.value) {
+    partners.value = await call('partner:list', { kind: partnerKind.value })
+  }
   if (!form.warehouseId && warehouses.value[0]) form.warehouseId = warehouses.value[0].id
+  if (isReturn.value) {
+    const list = await call('doc:list', { docType: origDocType.value as DocType, page: 1, pageSize: 100 })
+    origDocs.value = list.rows.filter((d) => d.status === 'posted')
+  }
 }
 
 async function searchItems(q: string): Promise<void> {
-  itemKeyword.value = q
   const r = await call('item:list', { keyword: q, page: 1, pageSize: 30 })
   itemOptions.value = r.rows
 }
 
+async function onRefDocChange(id: number | undefined): Promise<void> {
+  form.refDocId = id
+  form.lines = []
+  returnable.value = []
+  if (!id) return
+  const r = await call('doc:returnable', { refDocId: id })
+  returnable.value = r.lines.filter((l) => l.availableQty > 0)
+  form.partnerId = r.refDoc.partnerId ?? undefined
+  form.warehouseId = r.refDoc.warehouseId
+}
+
+function addReturnLine(rl: ReturnableLine): void {
+  if (form.lines.some((l) => l.refLineId === rl.refLineId)) {
+    ElMessage.warning('该原单行已添加')
+    return
+  }
+  form.lines.push({
+    itemId: rl.itemId,
+    itemCode: rl.itemCode,
+    itemName: rl.itemName,
+    serialManaged: rl.serialManaged,
+    qty: rl.availableQty,
+    unitPrice: toYuanInput(rl.unitPrice),
+    costAmount: null,
+    refLineId: rl.refLineId,
+    serials: [],
+    serialInput: '',
+    remark: '',
+  })
+}
+
+async function findBySerial(): Promise<void> {
+  const sn = serialFind.value.trim()
+  if (!sn || !isReturn.value) return
+  const hit = await call('doc:findBySerial', { serial: sn, docType: origDocType.value as 'PURCHASE' | 'SALE' })
+  if (!hit) {
+    ElMessage.warning('未找到包含该串号的原单')
+    return
+  }
+  await onRefDocChange(hit.docId)
+  const rl = returnable.value.find((l) => l.refLineId === hit.lineId)
+  if (rl) {
+    addReturnLine(rl)
+    const line = form.lines.find((l) => l.refLineId === hit.lineId)
+    if (line && !line.serials.includes(sn)) {
+      line.serials.push(sn)
+      line.qty = line.serials.length
+    }
+  }
+  serialFind.value = ''
+}
+
 function addLine(): void {
+  if (isReturn.value) return
   form.lines.push(emptyLine())
 }
 
@@ -94,13 +171,13 @@ function pickItem(line: EditLine, item: ItemRow | null | undefined): void {
   line.itemCode = item.code
   line.itemName = item.name
   line.serialManaged = item.serialManaged
-  line.unitPrice = toYuanInput(docType.value === 'PURCHASE' ? item.defaultBuyPrice : item.defaultSellPrice)
+  if (!isTransfer.value) {
+    line.unitPrice = toYuanInput(docType.value === 'PURCHASE' ? item.defaultBuyPrice : item.defaultSellPrice)
+  }
   line.serials = []
   line.serialInput = ''
-  if (line.serialManaged) line.qty = Math.max(line.qty, 1)
 }
 
-/** 扫码枪：回车即提交一个串号（设计文档 11.2）。 */
 function commitSerial(line: EditLine): void {
   const sn = line.serialInput.trim()
   if (!sn) return
@@ -125,7 +202,9 @@ function fromDetail(d: DocDetail): void {
   form.status = d.status
   form.bizDate = d.bizDate
   form.warehouseId = d.warehouseId
+  form.toWarehouseId = d.toWarehouseId ?? undefined
   form.partnerId = d.partnerId ?? undefined
+  form.refDocId = d.refDocId ?? undefined
   form.remark = d.remark
   form.lines = d.lines.map((l) => ({
     itemId: l.itemId,
@@ -135,6 +214,7 @@ function fromDetail(d: DocDetail): void {
     qty: l.qty,
     unitPrice: toYuanInput(l.unitPrice),
     costAmount: l.costAmount ?? null,
+    refLineId: l.refLineId,
     serials: [...l.serials],
     serialInput: '',
     remark: l.remark,
@@ -144,21 +224,32 @@ function fromDetail(d: DocDetail): void {
 async function load(): Promise<void> {
   await loadMeta()
   if (isNew.value) {
-    form.lines = [emptyLine()]
+    if (!isReturn.value) form.lines = [emptyLine()]
   } else {
-    const d = await call('doc:get', { id: Number(docIdParam.value) })
-    fromDetail(d)
+    fromDetail(await call('doc:get', { id: Number(docIdParam.value) }))
   }
   loaded.value = true
 }
 
 async function save(): Promise<void> {
-  if (saving.value || !form.warehouseId || !form.partnerId) {
-    if (!form.warehouseId || !form.partnerId) ElMessage.warning('请选择仓库和往来单位')
+  if (saving.value || !form.warehouseId) {
+    ElMessage.warning('请选择仓库')
+    return
+  }
+  if (isTransfer.value && !form.toWarehouseId) {
+    ElMessage.warning('请选择调入仓')
+    return
+  }
+  if (!isTransfer.value && !form.partnerId) {
+    ElMessage.warning('请选择往来单位')
+    return
+  }
+  if (isReturn.value && !form.refDocId) {
+    ElMessage.warning('请选择原单')
     return
   }
   if (form.lines.length === 0 || form.lines.some((l) => !l.itemId)) {
-    ElMessage.warning('请完善明细商品')
+    ElMessage.warning('请完善明细')
     return
   }
   saving.value = true
@@ -167,12 +258,15 @@ async function save(): Promise<void> {
       docType: docType.value,
       bizDate: form.bizDate,
       warehouseId: form.warehouseId,
-      partnerId: form.partnerId,
+      ...(isTransfer.value ? { toWarehouseId: form.toWarehouseId } : {}),
+      ...(!isTransfer.value ? { partnerId: form.partnerId } : {}),
+      ...(isReturn.value ? { refDocId: form.refDocId } : {}),
       remark: form.remark,
       lines: form.lines.map((l) => ({
         itemId: l.itemId!,
         qty: l.serialManaged ? l.serials.length || l.qty : l.qty,
         unitPrice: l.unitPrice,
+        ...(l.refLineId ? { refLineId: l.refLineId } : {}),
         serials: l.serialManaged ? l.serials : [],
         remark: l.remark,
       })),
@@ -193,8 +287,7 @@ async function save(): Promise<void> {
 async function doUnpost(): Promise<void> {
   if (!form.id) return
   try {
-    const d = await call('doc:unpost', { id: form.id })
-    fromDetail(d)
+    fromDetail(await call('doc:unpost', { id: form.id }))
     ElMessage.success('已反过账，可修改后重新保存')
   } catch (e) {
     showError(e)
@@ -209,15 +302,13 @@ onMounted(load)
     <div class="toolbar">
       <el-button @click="router.push(`/docs/${docType}`)">返回列表</el-button>
       <span class="spacer" />
-      <template v-if="readOnlyPosted && session.isOwner">
-        <el-button type="warning" @click="doUnpost">反过账</el-button>
-      </template>
-      <el-button v-if="canEdit && (!readOnlyPosted || form.status === 'draft')" type="primary" :loading="saving" @click="save">
+      <el-button v-if="readOnlyPosted && session.isOwner" type="warning" @click="doUnpost">反过账</el-button>
+      <el-button v-if="!readOnlyPosted || form.status === 'draft'" type="primary" :loading="saving" @click="save">
         保存并过账
       </el-button>
     </div>
 
-    <el-form label-width="80px" class="head" :disabled="readOnlyPosted && form.status === 'posted'">
+    <el-form label-width="84px" class="head" :disabled="readOnlyPosted && form.status === 'posted'">
       <el-row :gutter="12">
         <el-col :span="6">
           <el-form-item label="单号"><el-input :model-value="form.docNo || '（保存后生成）'" disabled /></el-form-item>
@@ -234,17 +325,47 @@ onMounted(load)
           </el-form-item>
         </el-col>
         <el-col :span="6">
-          <el-form-item label="仓库" required>
+          <el-form-item :label="isTransfer ? '调出仓' : '仓库'" required>
             <el-select v-model="form.warehouseId" style="width: 100%">
               <el-option v-for="w in warehouses" :key="w.id" :label="`${w.code} ${w.name}`" :value="w.id" />
             </el-select>
           </el-form-item>
         </el-col>
-        <el-col :span="6">
+        <el-col v-if="isTransfer" :span="6">
+          <el-form-item label="调入仓" required>
+            <el-select v-model="form.toWarehouseId" style="width: 100%">
+              <el-option v-for="w in warehouses" :key="w.id" :label="`${w.code} ${w.name}`" :value="w.id" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col v-if="!isTransfer" :span="6">
           <el-form-item :label="partnerKind === 'supplier' ? '供应商' : '客户'" required>
-            <el-select v-model="form.partnerId" filterable style="width: 100%">
+            <el-select v-model="form.partnerId" filterable style="width: 100%" :disabled="isReturn">
               <el-option v-for="p in partners" :key="p.id" :label="`${p.code} ${p.name}`" :value="p.id" />
             </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col v-if="isReturn" :span="12">
+          <el-form-item label="原单" required>
+            <el-select
+              :model-value="form.refDocId"
+              filterable
+              style="width: 100%"
+              placeholder="选择原单"
+              @change="onRefDocChange"
+            >
+              <el-option
+                v-for="d in origDocs"
+                :key="d.id"
+                :label="`${d.docNo} ${d.bizDate} ${d.partnerName ?? ''}`"
+                :value="d.id"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col v-if="isReturn" :span="12">
+          <el-form-item label="扫串号找原单">
+            <el-input v-model="serialFind" placeholder="扫码后回车" @keyup.enter="findBySerial" />
           </el-form-item>
         </el-col>
         <el-col :span="24">
@@ -253,32 +374,45 @@ onMounted(load)
       </el-row>
     </el-form>
 
+    <div v-if="isReturn && !(readOnlyPosted && form.status === 'posted')" class="toolbar">
+      <span>可退明细：</span>
+      <el-button
+        v-for="rl in returnable"
+        :key="rl.refLineId"
+        size="small"
+        @click="addReturnLine(rl)"
+      >
+        {{ rl.itemCode }} 可退 {{ rl.availableQty }}
+      </el-button>
+    </div>
+
     <div class="toolbar">
       <strong>{{ title }}明细</strong>
       <span class="spacer" />
-      <el-button v-if="!(readOnlyPosted && form.status === 'posted')" @click="addLine">加行</el-button>
+      <el-button v-if="!isReturn && !(readOnlyPosted && form.status === 'posted')" @click="addLine">加行</el-button>
     </div>
 
     <el-table :data="form.lines" border style="width: 100%">
-      <el-table-column label="商品" min-width="220">
+      <el-table-column label="商品" min-width="200">
         <template #default="{ row }">
+          <template v-if="isReturn || (readOnlyPosted && form.status === 'posted')">
+            {{ row.itemCode }} {{ row.itemName }}
+          </template>
           <el-select
+            v-else
             :model-value="row.itemId"
             filterable
             remote
             :remote-method="searchItems"
-            placeholder="编码/名称/条码"
             style="width: 100%"
-            :disabled="readOnlyPosted && form.status === 'posted'"
             @change="(id: number) => pickItem(row, itemOptions.find((i) => i.id === id) ?? null)"
           >
+            <el-option v-for="i in itemOptions" :key="i.id" :label="`${i.code} ${i.name}`" :value="i.id" />
             <el-option
-              v-for="i in itemOptions"
-              :key="i.id"
-              :label="`${i.code} ${i.name}`"
-              :value="i.id"
+              v-if="row.itemId && !itemOptions.some((i) => i.id === row.itemId)"
+              :label="`${row.itemCode} ${row.itemName}`"
+              :value="row.itemId"
             />
-            <el-option v-if="row.itemId && !itemOptions.some((i) => i.id === row.itemId)" :label="`${row.itemCode} ${row.itemName}`" :value="row.itemId" />
           </el-select>
         </template>
       </el-table-column>
@@ -293,16 +427,21 @@ onMounted(load)
           />
         </template>
       </el-table-column>
-      <el-table-column label="单价" width="120">
+      <el-table-column v-if="!isTransfer" label="单价" width="110">
         <template #default="{ row }">
-          <el-input v-model="row.unitPrice" :disabled="readOnlyPosted && form.status === 'posted'" />
+          <el-input v-model="row.unitPrice" :disabled="lockedPrice || (readOnlyPosted && form.status === 'posted')" />
         </template>
       </el-table-column>
-      <el-table-column label="串号" min-width="220">
+      <el-table-column label="串号" min-width="200">
         <template #default="{ row }">
           <template v-if="row.serialManaged">
             <div class="serials">
-              <el-tag v-for="sn in row.serials" :key="sn" closable :disable-transitions="true" @close="removeSerial(row, sn)">
+              <el-tag
+                v-for="sn in row.serials"
+                :key="sn"
+                :closable="!(readOnlyPosted && form.status === 'posted')"
+                @close="removeSerial(row, sn)"
+              >
                 {{ sn }}
               </el-tag>
             </div>

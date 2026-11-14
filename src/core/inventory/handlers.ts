@@ -1,7 +1,7 @@
-import { BizError } from '../domain/errors'
 import { inTransaction } from '../db/tx'
 import { handler } from '../rpc'
 import { getDocDetail, listDocs } from './query'
+import { findDocBySerial, getReturnable } from './returns'
 import { createAndPost, post, unpost, updateAndPost } from './service'
 
 export const inventoryHandlers = {
@@ -30,9 +30,11 @@ export const inventoryHandlers = {
     return getDocDetail(ctx.core.db, input.id, ctx.session.role)
   }),
 
-  'doc:returnable': handler('doc:returnable', 'user', () => {
-    throw new BizError('INTERNAL', undefined, '退货功能开发中（M4）')
-  }),
+  'doc:returnable': handler('doc:returnable', 'user', (ctx, input) =>
+    getReturnable(ctx.core.db, input.refDocId, ctx.session.role),
+  ),
 
-  'doc:findBySerial': handler('doc:findBySerial', 'user', () => null),
+  'doc:findBySerial': handler('doc:findBySerial', 'user', (ctx, input) =>
+    findDocBySerial(ctx.core.db, input.serial, input.docType),
+  ),
 }

@@ -80,7 +80,7 @@ function unpostPosted(db: DB, doc: DocRecord, userId: number, now: string, reaso
 
 export function createAndPost(db: DB, clock: Clock, session: SessionInfo, input: DocInputParsed): number {
   assertInTransaction(db)
-  const norm = normalizeDoc(db, input, clock.today())
+  const norm = normalizeDoc(db, input, clock.today(), 0)
   const now = clock.now()
   const docNo = nextDocNo(db, norm.header.docType, createdDay(now))
   const id = insertDoc(db, docNo, norm.header, session.userId, now)
@@ -103,11 +103,11 @@ export function updateAndPost(
   ensure(doc.doc_type === input.docType, 'VALIDATION_FAILED', { field: 'docType' }, '不能修改单据类型')
   if (doc.status === 'posted') ensure(session.role === 'owner', 'FORBIDDEN', { required: 'owner' })
 
-  const norm = normalizeDoc(db, input, clock.today())
+  // 修改退货单时排除本单，避免“已退数量”把自己算进去。
+  const norm = normalizeDoc(db, input, clock.today(), id)
   const header: HeaderWrite = {
     ...norm.header,
-    refDocId: doc.ref_doc_id,
-    toWarehouseId: doc.to_warehouse_id,
+    // 以规范化结果为准（退货/移库的关联字段由 validate 写出）。
   }
   const now = clock.now()
   const aff = new Affected()
