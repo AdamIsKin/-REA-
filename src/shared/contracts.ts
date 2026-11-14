@@ -14,18 +14,22 @@ import { z } from 'zod'
 import { parseYuan, type Cents } from './money'
 import type {
   AuthStatus,
+  BrandRow,
+  CategoryRow,
   DocDetail,
   DocSummary,
   ItemRow,
   Paged,
   PartnerRow,
   ProfitReport,
+  PurchaseDetailRow,
   Returnable,
   SerialTrace,
   SessionInfo,
   StockMoveRow,
   StockRow,
   SystemInfo,
+  UserOption,
   UserRow,
   WarehouseRow,
 } from './dto'
@@ -68,6 +72,9 @@ const docLineInput = z.object({
   itemId: id,
   qty: z.number().int().positive('数量必须大于 0').max(1_000_000),
   unitPrice: yuanNonNegative.prefault('0'),
+  /** R26：返利预留；缺省 0。 */
+  rebatePerUnit: yuanNonNegative.prefault('0'),
+  rebateAmount: yuanNonNegative.prefault('0'),
   refLineId: id.optional(),
   serials: z.array(serial).max(10_000).default([]),
   remark: text(255).default(''),
@@ -80,6 +87,8 @@ const docInput = z.object({
   toWarehouseId: id.optional(),
   partnerId: id.optional(),
   refDocId: id.optional(),
+  /** R24：指定录入人；缺省则用当前登录用户。 */
+  createdByUserId: id.optional(),
   remark: text(255).default(''),
   lines: z.array(docLineInput).min(1, '至少要有一行明细').max(1000),
 })
@@ -118,6 +127,8 @@ export const schemas = {
     enabled: z.boolean(),
   }),
   'user:resetPassword': z.object({ id, password }),
+  /** 录入人下拉（R24）：任意登录用户可读，仅返回启用账号的简要信息。 */
+  'user:options': z.object({}),
 
   // —— 基础资料 ——
   'warehouse:list': z.object({ includeDisabled: z.boolean().default(false) }),
@@ -126,6 +137,21 @@ export const schemas = {
     code,
     name: requiredText(64),
     remark: text(255).default(''),
+    enabled: z.boolean().default(true),
+  }),
+
+  'category:list': z.object({ includeDisabled: z.boolean().default(false) }),
+  'category:save': z.object({
+    id: id.optional(),
+    code,
+    name: requiredText(64),
+    enabled: z.boolean().default(true),
+  }),
+  'brand:list': z.object({ includeDisabled: z.boolean().default(false) }),
+  'brand:save': z.object({
+    id: id.optional(),
+    code,
+    name: requiredText(64),
     enabled: z.boolean().default(true),
   }),
 
@@ -147,9 +173,8 @@ export const schemas = {
     barcode: text(64)
       .default('')
       .transform((s) => (s === '' ? null : s)),
-    category: text(64).default(''),
-    brand: text(64).default(''),
-    serialManaged: z.boolean(),
+    categoryId: id.nullable().optional(),
+    brandId: id.nullable().optional(),
     defaultBuyPrice: yuanNonNegative,
     defaultSellPrice: yuanNonNegative,
     remark: text(255).default(''),
@@ -196,6 +221,23 @@ export const schemas = {
   'doc:returnable': z.object({ refDocId: id }),
   /** 退货录入时扫串号自动找原单（R14）：在已过账的采购 / 销售单中找最近一次包含该串号的行。 */
   'doc:findBySerial': z.object({ serial, docType: z.enum(['PURCHASE', 'SALE']) }),
+
+  /** 采购入库明细台账（R25）：按串号一行。 */
+  'purchase:detailList': z.object({
+    keyword: text(64).default(''),
+    dateFrom: isoDate.optional(),
+    dateTo: isoDate.optional(),
+    partnerId: id.optional(),
+    warehouseId: id.optional(),
+    page: z.number().int().min(1).default(1),
+    pageSize: z.number().int().min(1).max(500).default(50),
+  }),
+  /** 仅更新返利预留字段，不重过账（R26）。 */
+  'purchase:updateRebate': z.object({
+    lineId: id,
+    rebatePerUnit: yuanNonNegative,
+    rebateAmount: yuanNonNegative,
+  }),
 
   // —— 查询与报表 ——
   'stock:list': z.object({
@@ -246,8 +288,13 @@ export interface Outputs {
   'user:create': UserRow
   'user:update': UserRow
   'user:resetPassword': null
+  'user:options': UserOption[]
   'warehouse:list': WarehouseRow[]
   'warehouse:save': WarehouseRow
+  'category:list': CategoryRow[]
+  'category:save': CategoryRow
+  'brand:list': BrandRow[]
+  'brand:save': BrandRow
   'item:list': { rows: ItemRow[]; total: number }
   'item:get': ItemRow
   'item:lookup': ItemRow | null
@@ -262,6 +309,8 @@ export interface Outputs {
   'doc:post': DocDetail
   'doc:returnable': Returnable
   'doc:findBySerial': { docId: number; docNo: string; lineId: number } | null
+  'purchase:detailList': Paged<PurchaseDetailRow>
+  'purchase:updateRebate': null
   'stock:list': StockRow[]
   'stock:moves': Paged<StockMoveRow>
   'serial:trace': SerialTrace

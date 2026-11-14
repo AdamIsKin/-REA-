@@ -14,6 +14,7 @@ const sql = defineStatements({
   item: 'SELECT id, code, name, serial_managed, enabled FROM item WHERE id = ?',
   warehouse: 'SELECT id, enabled FROM warehouse WHERE id = ?',
   partner: 'SELECT id, kind, enabled FROM partner WHERE id = ?',
+  userEnabled: 'SELECT id FROM user WHERE id = ? AND enabled = 1',
   doc: 'SELECT id, doc_type, status, partner_id FROM doc WHERE id = ?',
   line: 'SELECT id, doc_id, item_id, qty, unit_price FROM doc_line WHERE id = ?',
   lineSerials: 'SELECT serial FROM doc_line_serial WHERE line_id = ?',
@@ -52,6 +53,7 @@ function requireWarehouse(db: DB, id: number, field: string): void {
   ensure(wh.enabled === 1, 'VALIDATION_FAILED', { field }, '仓库已停用')
 }
 
+/** R23：全部商品必须按串号管理，数量只能等于串号个数。 */
 function checkSerials(
   item: ItemInfo,
   lineNo: number,
@@ -59,17 +61,21 @@ function checkSerials(
   serials: string[],
   seen: Set<string>,
 ): void {
-  if (item.serial_managed === 1) {
-    if (serials.length !== qty) {
-      throw new BizError('SERIAL_COUNT_MISMATCH', { lineNo, qty, count: serials.length, itemCode: item.code })
-    }
-    for (const sn of serials) {
-      if (seen.has(sn)) throw new BizError('SERIAL_DUPLICATE_IN_DOC', { serial: sn, lineNo })
-      seen.add(sn)
-    }
-  } else if (serials.length > 0) {
-    throw new BizError('VALIDATION_FAILED', { lineNo, field: 'serials' }, `商品 ${item.code} 不按串号管理，不能填串号`)
+  ensure(item.serial_managed === 1, 'VALIDATION_FAILED', { lineNo, itemCode: item.code }, '全部商品须按串号管理')
+  if (serials.length !== qty) {
+    throw new BizError('SERIAL_COUNT_MISMATCH', { lineNo, qty, count: serials.length, itemCode: item.code })
   }
+  for (const sn of serials) {
+    if (seen.has(sn)) throw new BizError('SERIAL_DUPLICATE_IN_DOC', { serial: sn, lineNo })
+    seen.add(sn)
+  }
+}
+
+/** R24：录入人必须是启用中的用户。 */
+export function resolveCreatedBy(db: DB, sessionUserId: number, createdByUserId: number | undefined): number {
+  if (createdByUserId === undefined) return sessionUserId
+  ensure(sql(db).userEnabled.get(createdByUserId), 'NOT_FOUND', { type: 'user', id: createdByUserId }, '录入人不存在或已停用')
+  return createdByUserId
 }
 
 /**
@@ -106,6 +112,8 @@ export function normalizeDoc(
         qty: line.qty,
         unitPrice: 0,
         amount: 0,
+        rebatePerUnit: 0,
+        rebateAmount: 0,
         refLineId: null,
         remark: line.remark,
         serials: line.serials,
@@ -147,6 +155,8 @@ export function normalizeDoc(
         qty: line.qty,
         unitPrice: line.unitPrice,
         amount: line.unitPrice * line.qty,
+        rebatePerUnit: line.rebatePerUnit,
+        rebateAmount: line.rebateAmount,
         refLineId: null,
         remark: line.remark,
         serials: line.serials,
@@ -226,6 +236,8 @@ export function normalizeDoc(
       qty: line.qty,
       unitPrice,
       amount: unitPrice * line.qty,
+      rebatePerUnit: line.rebatePerUnit,
+      rebateAmount: line.rebateAmount,
       refLineId: origLine.id,
       remark: line.remark,
       serials: line.serials,

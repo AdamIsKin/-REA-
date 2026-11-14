@@ -4,7 +4,7 @@ import { CLERK, OWNER, setup } from './helpers'
 
 test('迁移后 schema 版本为最新，外键开启', () => {
   const { db } = setup()
-  assert.equal(db.pragma('user_version', { simple: true }), 1)
+  assert.equal(db.pragma('user_version', { simple: true }), 2)
   assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
 })
 
@@ -37,17 +37,16 @@ test('商品编码重复返回 CODE_DUPLICATE；金额按元字符串解析为�
   const { call, fail } = setup()
   const item = call(OWNER, 'item:save', {
     code: 'A1',
-    name: '数据线',
-    serialManaged: false,
+    name: '手机线',
     defaultBuyPrice: '1',
     defaultSellPrice: '19.9',
   })
   assert.equal(item.defaultBuyPrice, 100)
   assert.equal(item.defaultSellPrice, 1990)
+  assert.equal(item.serialManaged, true)
   const e = fail(OWNER, 'item:save', {
     code: 'A1',
     name: 'x',
-    serialManaged: false,
     defaultBuyPrice: '0',
     defaultSellPrice: '0',
   })

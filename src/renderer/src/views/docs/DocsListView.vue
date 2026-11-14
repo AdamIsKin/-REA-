@@ -80,7 +80,12 @@ onMounted(load)
       <el-table-column prop="bizDate" label="业务日期" width="110" />
       <el-table-column :label="isTransfer ? '调出仓' : '仓库'" width="120" prop="warehouseName" />
       <el-table-column v-if="isTransfer" prop="toWarehouseName" label="调入仓" width="120" />
-      <el-table-column v-if="!isTransfer" prop="partnerName" label="往来单位" min-width="140" />
+      <el-table-column
+        v-if="!isTransfer"
+        prop="partnerName"
+        :label="docType === 'PURCHASE' || docType === 'PURCHASE_RETURN' ? '供应商' : '客户'"
+        min-width="140"
+      />
       <el-table-column v-if="isReturn" prop="refDocNo" label="原单号" width="160" />
       <el-table-column label="数量" width="80" align="right">
         <template #default="{ row }">{{ row.totalQty }}</template>

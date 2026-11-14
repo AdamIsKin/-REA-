@@ -1,17 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { CLERK, OWNER, setup, type TestEnv } from './helpers'
+import { CLERK, OWNER, setup, sns, type TestEnv } from './helpers'
 
-/** 准备仓库、往来单位、商品，返回 id。 */
-function seed(env: TestEnv, opts?: { serial?: boolean }) {
+/** 准备仓库、往来单位、商品（R23 全串号）。 */
+function seed(env: TestEnv) {
   const { call } = env
   const wh = call(OWNER, 'warehouse:save', { code: 'W1', name: '门店仓' })
   const supplier = call(OWNER, 'partner:save', { kind: 'supplier', code: 'S1', name: '供应商A' })
   const customer = call(OWNER, 'partner:save', { kind: 'customer', code: 'C1', name: '客户A' })
   const item = call(OWNER, 'item:save', {
     code: 'P1',
-    name: opts?.serial ? '手机X' : '数据线',
-    serialManaged: opts?.serial ?? false,
+    name: '手机X',
     defaultBuyPrice: '100',
     defaultSellPrice: '199',
   })
@@ -22,13 +21,14 @@ test('1. 采购入库后，结存和流水正确', () => {
   const env = setup()
   const { call, db } = env
   const { wh, supplier, item } = seed(env)
+  const serials = sns('A', 5)
 
   const doc = call(CLERK, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-10',
     warehouseId: wh.id,
     partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 5, unitPrice: '100.00' }],
+    lines: [{ itemId: item.id, qty: 5, unitPrice: '100.00', serials }],
   })
   assert.equal(doc.status, 'posted')
   assert.equal(doc.totalQty, 5)
@@ -55,14 +55,14 @@ test('2. 销售数量超过结存时报 STOCK_NEGATIVE', () => {
     bizDate: '2026-11-10',
     warehouseId: wh.id,
     partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 3, unitPrice: '100' }],
+    lines: [{ itemId: item.id, qty: 3, unitPrice: '100', serials: sns('B', 3) }],
   })
   const e = fail(CLERK, 'doc:create', {
     docType: 'SALE',
     bizDate: '2026-11-12',
     warehouseId: wh.id,
     partnerId: customer.id,
-    lines: [{ itemId: item.id, qty: 5, unitPrice: '199' }],
+    lines: [{ itemId: item.id, qty: 5, unitPrice: '199', serials: sns('X', 5) }],
   })
   assert.equal(e.code, 'STOCK_NEGATIVE')
   assert.equal(e.details?.['date'], '2026-11-12')
@@ -72,27 +72,27 @@ test('3. 补录早日期出库导致后续变负，错误日期是首次变负�
   const env = setup()
   const { call, fail } = env
   const { wh, supplier, customer, item } = seed(env)
-  // 11-01 入 10；11-10 卖 8；再补录 11-05 卖 5 → 11-10 会变负。
+  const stock = sns('C', 10)
   call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-01',
     warehouseId: wh.id,
     partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 10, unitPrice: '100' }],
+    lines: [{ itemId: item.id, qty: 10, unitPrice: '100', serials: stock }],
   })
   call(OWNER, 'doc:create', {
     docType: 'SALE',
     bizDate: '2026-11-10',
     warehouseId: wh.id,
     partnerId: customer.id,
-    lines: [{ itemId: item.id, qty: 8, unitPrice: '199' }],
+    lines: [{ itemId: item.id, qty: 8, unitPrice: '199', serials: stock.slice(0, 8) }],
   })
   const e = fail(OWNER, 'doc:create', {
     docType: 'SALE',
     bizDate: '2026-11-05',
     warehouseId: wh.id,
     partnerId: customer.id,
-    lines: [{ itemId: item.id, qty: 5, unitPrice: '199' }],
+    lines: [{ itemId: item.id, qty: 5, unitPrice: '199', serials: stock.slice(5, 10) }],
   })
   assert.equal(e.code, 'STOCK_NEGATIVE')
   assert.equal(e.details?.['date'], '2026-11-10')
@@ -101,7 +101,7 @@ test('3. 补录早日期出库导致后续变负，错误日期是首次变负�
 test('4. 串号个数与数量不一致时报 SERIAL_COUNT_MISMATCH', () => {
   const env = setup()
   const { fail } = env
-  const { wh, supplier, item } = seed(env, { serial: true })
+  const { wh, supplier, item } = seed(env)
   const e = fail(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-10',
@@ -115,7 +115,7 @@ test('4. 串号个数与数量不一致时报 SERIAL_COUNT_MISMATCH', () => {
 test('5. 同一串号再次入库报 SERIAL_CONFLICT', () => {
   const env = setup()
   const { call, fail } = env
-  const { wh, supplier, item } = seed(env, { serial: true })
+  const { wh, supplier, item } = seed(env)
   call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-10',
@@ -136,9 +136,8 @@ test('5. 同一串号再次入库报 SERIAL_CONFLICT', () => {
 test('6. 卖出不在本仓库的串号报 SERIAL_NOT_AVAILABLE', () => {
   const env = setup()
   const { call, fail } = env
-  const { wh, supplier, customer, item } = seed(env, { serial: true })
+  const { wh, supplier, customer, item } = seed(env)
   const wh2 = call(OWNER, 'warehouse:save', { code: 'W2', name: '备用仓' })
-  // W1 有 SN-B；W2 另有 SN-D（保证 W2 数量够，才会落到串号时间线检查而不是 STOCK_NEGATIVE）。
   call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-10',
@@ -166,7 +165,7 @@ test('6. 卖出不在本仓库的串号报 SERIAL_NOT_AVAILABLE', () => {
 test('7. 串号卖出后再入库成功；再次卖出成本取新入库成本', () => {
   const env = setup()
   const { call } = env
-  const { wh, supplier, customer, item } = seed(env, { serial: true })
+  const { wh, supplier, customer, item } = seed(env)
 
   call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
@@ -210,7 +209,7 @@ test('8. 失败的过账不留下任何数据', () => {
     bizDate: '2026-11-10',
     warehouseId: wh.id,
     partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 2, unitPrice: '100' }],
+    lines: [{ itemId: item.id, qty: 2, unitPrice: '100', serials: sns('D', 2) }],
   })
   const beforeDocs = (db.prepare('SELECT COUNT(*) AS n FROM doc').get() as { n: number }).n
   const beforeMoves = (db.prepare('SELECT COUNT(*) AS n FROM stock_move').get() as { n: number }).n
@@ -220,7 +219,7 @@ test('8. 失败的过账不留下任何数据', () => {
     bizDate: '2026-11-12',
     warehouseId: wh.id,
     partnerId: customer.id,
-    lines: [{ itemId: item.id, qty: 9, unitPrice: '199' }],
+    lines: [{ itemId: item.id, qty: 9, unitPrice: '199', serials: sns('Z', 9) }],
   })
 
   assert.equal((db.prepare('SELECT COUNT(*) AS n FROM doc').get() as { n: number }).n, beforeDocs)

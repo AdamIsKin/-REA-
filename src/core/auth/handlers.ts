@@ -21,6 +21,7 @@ const sql = defineStatements({
   byId: 'SELECT * FROM user WHERE id = ?',
   byName: 'SELECT * FROM user WHERE username = ?',
   list: 'SELECT * FROM user ORDER BY id',
+  options: "SELECT id, username, display_name FROM user WHERE enabled = 1 ORDER BY id",
   insert: `INSERT INTO user (username, display_name, password_hash, role, enabled, created_at)
            VALUES (@username, @displayName, @hash, @role, 1, @now)`,
   update: 'UPDATE user SET display_name = @displayName, role = @role, enabled = @enabled WHERE id = @id',
@@ -113,6 +114,16 @@ export const authHandlers = {
   // —————————————— 用户管理（仅老板） ——————————————
 
   'user:list': handler('user:list', 'owner', (ctx) => (sql(ctx.core.db).list.all() as UserRecord[]).map(toRow)),
+
+  'user:options': handler('user:options', 'user', (ctx) =>
+    (
+      sql(ctx.core.db).options.all() as { id: number; username: string; display_name: string }[]
+    ).map((u) => ({
+      id: u.id,
+      username: u.username,
+      displayName: u.display_name || u.username,
+    })),
+  ),
 
   'user:create': handler('user:create', 'owner', (ctx, input) => {
     const { db, clock } = ctx.core

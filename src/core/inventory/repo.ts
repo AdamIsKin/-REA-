@@ -30,6 +30,8 @@ export interface LineRecord {
   qty: number
   unit_price: number
   amount: number
+  rebate_per_unit: number
+  rebate_amount: number
   ref_line_id: number | null
   cost_amount: number
   remark: string
@@ -42,6 +44,8 @@ export interface LineWrite {
   qty: number
   unitPrice: number
   amount: number
+  rebatePerUnit: number
+  rebateAmount: number
   refLineId: number | null
   remark: string
   serials: string[]
@@ -69,16 +73,18 @@ const sql = defineStatements({
   insertDoc: `INSERT INTO doc (doc_no, doc_type, biz_date, warehouse_id, to_warehouse_id, partner_id, ref_doc_id,
                 status, remark, created_by, updated_by, created_at, updated_at)
               VALUES (@docNo, @docType, @bizDate, @warehouseId, @toWarehouseId, @partnerId, @refDocId,
-                'draft', @remark, @userId, @userId, @now, @now)`,
+                'draft', @remark, @createdBy, @updatedBy, @now, @now)`,
   updateHeader: `UPDATE doc SET biz_date = @bizDate, warehouse_id = @warehouseId, to_warehouse_id = @toWarehouseId,
-                   partner_id = @partnerId, remark = @remark, updated_by = @userId, updated_at = @now
+                   partner_id = @partnerId, remark = @remark, created_by = @createdBy,
+                   updated_by = @updatedBy, updated_at = @now
                  WHERE id = @id`,
   setPosted: "UPDATE doc SET status = 'posted', posted_at = ? WHERE id = ?",
   setDraft: "UPDATE doc SET status = 'draft', posted_at = NULL, updated_by = ?, updated_at = ? WHERE id = ?",
   deleteLines: 'DELETE FROM doc_line WHERE doc_id = ?',
-  insertLine: `INSERT INTO doc_line (doc_id, line_no, item_id, qty, unit_price, amount, ref_line_id, remark)
-               VALUES (@docId, @lineNo, @itemId, @qty, @unitPrice, @amount, @refLineId, @remark)`,
+  insertLine: `INSERT INTO doc_line (doc_id, line_no, item_id, qty, unit_price, amount, rebate_per_unit, rebate_amount, ref_line_id, remark)
+               VALUES (@docId, @lineNo, @itemId, @qty, @unitPrice, @amount, @rebatePerUnit, @rebateAmount, @refLineId, @remark)`,
   insertSerial: 'INSERT INTO doc_line_serial (line_id, serial) VALUES (?, ?)',
+  updateRebate: 'UPDATE doc_line SET rebate_per_unit = ?, rebate_amount = ? WHERE id = ?',
 })
 
 export const getDoc = (db: DB, id: number): DocRecord | undefined => sql(db).docById.get(id) as DocRecord | undefined
@@ -101,12 +107,30 @@ export function getDocSerials(db: DB, docId: number): Map<number, string[]> {
   return map
 }
 
-export function insertDoc(db: DB, docNo: string, h: HeaderWrite, userId: number, now: string): number {
-  return Number(sql(db).insertDoc.run({ ...h, docNo, userId, now }).lastInsertRowid)
+export function insertDoc(
+  db: DB,
+  docNo: string,
+  h: HeaderWrite,
+  createdBy: number,
+  updatedBy: number,
+  now: string,
+): number {
+  return Number(sql(db).insertDoc.run({ ...h, docNo, createdBy, updatedBy, now }).lastInsertRowid)
 }
 
-export function updateHeader(db: DB, id: number, h: HeaderWrite, userId: number, now: string): void {
-  sql(db).updateHeader.run({ ...h, id, userId, now })
+export function updateHeader(
+  db: DB,
+  id: number,
+  h: HeaderWrite,
+  createdBy: number,
+  updatedBy: number,
+  now: string,
+): void {
+  sql(db).updateHeader.run({ ...h, id, createdBy, updatedBy, now })
+}
+
+export function updateLineRebate(db: DB, lineId: number, rebatePerUnit: number, rebateAmount: number): void {
+  sql(db).updateRebate.run(rebatePerUnit, rebateAmount, lineId)
 }
 
 /** 替换全部明细：先删（串号、成本分配随外键级联删除）再插。修改单据时行 id 会变，但单据 id 不变，排序位置不变。 */

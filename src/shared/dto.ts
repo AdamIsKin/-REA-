@@ -46,6 +46,21 @@ export interface WarehouseRow {
   enabled: boolean
 }
 
+/** 商品分类 / 品牌主数据（D39）。 */
+export interface CategoryRow {
+  id: number
+  code: string
+  name: string
+  enabled: boolean
+}
+
+export interface BrandRow {
+  id: number
+  code: string
+  name: string
+  enabled: boolean
+}
+
 export interface ItemRow {
   id: number
   code: string
@@ -53,15 +68,50 @@ export interface ItemRow {
   spec: string
   unit: string
   barcode: string | null
-  category: string
-  brand: string
+  categoryId: number | null
+  categoryName: string
+  brandId: number | null
+  brandName: string
+  /** 固定为 true（R23）；字段保留便于页面兼容。 */
   serialManaged: boolean
-  /** 一旦有库存流水，串号管理标志就锁定（ITEM_SERIAL_FLAG_LOCKED）；页面据此禁用开关。 */
-  serialFlagLocked: boolean
   defaultBuyPrice: Cents
   defaultSellPrice: Cents
   remark: string
   enabled: boolean
+}
+
+/** 录入人下拉（R24）；不含密码与权限细节。 */
+export interface UserOption {
+  id: number
+  username: string
+  displayName: string
+}
+
+/** 采购入库明细台账一行（按串号展开，R25）。 */
+export interface PurchaseDetailRow {
+  bizDate: string
+  docId: number
+  docNo: string
+  partnerName: string
+  warehouseName: string
+  categoryName: string
+  brandName: string
+  itemCode: string
+  itemName: string
+  qty: number
+  unitPrice: Cents
+  amount: Cents
+  rebatePerUnit: Cents
+  /** 按串号展开后的单行返利（等于单台）；整行件数见 lineQty。 */
+  rebateAmount: Cents
+  /** 原单据行数量，编辑返利时用于回写行级返利金额。 */
+  lineQty: number
+  serial: string
+  lineId: number
+  createdByName: string
+  createdAt: string
+  updatedByName: string
+  updatedAt: string
 }
 
 export type PartnerKind = 'supplier' | 'customer'
@@ -110,6 +160,8 @@ export interface DocLineDto {
   qty: number
   unitPrice: Cents
   amount: Cents
+  rebatePerUnit: Cents
+  rebateAmount: Cents
   refLineId: number | null
   /** 仅老板会话返回（R21）。 */
   costAmount?: Cents
@@ -136,6 +188,8 @@ export interface DocSummary {
   totalAmount: Cents
   /** 仅老板会话返回。 */
   totalCost?: Cents
+  /** 录入人用户 id（R24）。 */
+  createdBy: number
   createdByName: string
   createdAt: string
   postedAt: string | null

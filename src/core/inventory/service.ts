@@ -21,7 +21,7 @@ import {
   type HeaderWrite,
 } from './repo'
 import { checkSerialTimeline, checkStockTimeline } from './timeline'
-import { normalizeDoc } from './validate'
+import { normalizeDoc, resolveCreatedBy } from './validate'
 
 /**
  * 过账编排（设计文档 7.2–7.4）。
@@ -86,11 +86,12 @@ export function createAndPost(db: DB, clock: Clock, session: SessionInfo, input:
   assertInTransaction(db)
   const norm = normalizeDoc(db, input, clock.today(), 0)
   const now = clock.now()
+  const createdBy = resolveCreatedBy(db, session.userId, input.createdByUserId)
   const docNo = nextDocNo(db, norm.header.docType, createdDay(now))
-  const id = insertDoc(db, docNo, norm.header, session.userId, now)
+  const id = insertDoc(db, docNo, norm.header, createdBy, session.userId, now)
   replaceLines(db, id, norm.lines)
   postDraft(db, id, session.userId, now, 'post')
-  writeOpLog(db, session.userId, 'doc.create', { id, docNo, docType: norm.header.docType }, id, now)
+  writeOpLog(db, session.userId, 'doc.create', { id, docNo, docType: norm.header.docType, createdBy }, id, now)
   return id
 }
 
@@ -123,7 +124,8 @@ export function updateAndPost(
     markDraft(db, id, session.userId, now)
   }
 
-  updateHeader(db, id, header, session.userId, now)
+  const createdBy = resolveCreatedBy(db, doc.created_by, input.createdByUserId)
+  updateHeader(db, id, header, createdBy, session.userId, now)
   replaceLines(db, id, norm.lines)
 
   const fresh = getDoc(db, id)!

@@ -10,6 +10,7 @@ import {
   type ItemRow,
   type PartnerRow,
   type ReturnableLine,
+  type UserOption,
   type WarehouseRow,
 } from '@shared/dto'
 import { call, shellApi } from '../../api'
@@ -18,15 +19,19 @@ import { buildDocPrintHtml } from '../../print/docHtml'
 import { loadShopPrintInfo } from '../../print/shop'
 import { useSessionStore } from '../../stores/session'
 import { disableFuture, today, toYuanInput, yuan } from '../../utils/format'
+import SerialScanDialog from '../../components/SerialScanDialog.vue'
 
 interface EditLine {
   itemId: number | null
   itemCode: string
   itemName: string
+  /** R23：全商品串号；保留字段兼容历史明细展示。 */
   serialManaged: boolean
   qty: number
   unitPrice: string
   costAmount: number | null
+  rebatePerUnit: string
+  rebateAmount: string
   refLineId: number | null
   serials: string[]
   serialInput: string
@@ -48,6 +53,7 @@ const origDocType = computed(() => (docType.value === 'PURCHASE_RETURN' ? 'PURCH
 const warehouses = ref<WarehouseRow[]>([])
 const partners = ref<PartnerRow[]>([])
 const itemOptions = ref<ItemRow[]>([])
+const userOptions = ref<UserOption[]>([])
 const origDocs = ref<DocSummary[]>([])
 const returnable = ref<ReturnableLine[]>([])
 
@@ -59,6 +65,7 @@ const form = reactive({
   warehouseId: undefined as number | undefined,
   toWarehouseId: undefined as number | undefined,
   partnerId: undefined as number | undefined,
+  createdByUserId: undefined as number | undefined,
   refDocId: undefined as number | undefined,
   remark: '',
   lines: [] as EditLine[],
@@ -66,10 +73,14 @@ const form = reactive({
 const loaded = ref(false)
 const saving = ref(false)
 const serialFind = ref('')
+const scanOpen = ref(false)
+const scanLineIndex = ref(-1)
 
 const partnerKind = computed(() =>
   docType.value === 'PURCHASE' || docType.value === 'PURCHASE_RETURN' ? 'supplier' : 'customer',
 )
+const partnerLabel = computed(() => (partnerKind.value === 'supplier' ? '供应商' : '客户'))
+const isPurchase = computed(() => docType.value === 'PURCHASE')
 /** 新建：店员/老板均可编；已过账：只读；草稿：仅老板可编（R3，与 doc:update 一致）。 */
 const canEdit = computed(() => {
   if (isNew.value) return true
@@ -77,16 +88,21 @@ const canEdit = computed(() => {
   return session.isOwner
 })
 const lockedPrice = computed(() => isTransfer.value || isReturn.value)
+const scanLine = computed(() =>
+  scanLineIndex.value >= 0 ? (form.lines[scanLineIndex.value] ?? null) : null,
+)
 
 function emptyLine(): EditLine {
   return {
     itemId: null,
     itemCode: '',
     itemName: '',
-    serialManaged: false,
-    qty: 1,
+    serialManaged: true,
+    qty: 0,
     unitPrice: '0.00',
     costAmount: null,
+    rebatePerUnit: '0.00',
+    rebateAmount: '0.00',
     refLineId: null,
     serials: [],
     serialInput: '',
@@ -94,8 +110,42 @@ function emptyLine(): EditLine {
   }
 }
 
+/** 金额 = 单价 × 数量（展示用，落库由后端按同公式写 cost）。 */
+function lineAmountYuan(line: EditLine): string {
+  const price = Number(line.unitPrice || 0)
+  if (!Number.isFinite(price)) return '0.00'
+  return (price * line.qty).toFixed(2)
+}
+
+function syncLineQty(line: EditLine): void {
+  line.qty = line.serials.length
+  if (isPurchase.value) {
+    const per = Number(line.rebatePerUnit || 0)
+    line.rebateAmount = Number.isFinite(per) ? (per * line.qty).toFixed(2) : '0.00'
+  }
+}
+
+function openScan(idx: number): void {
+  if (!canEdit.value) return
+  scanLineIndex.value = idx
+  scanOpen.value = true
+}
+
+function onScanConfirm(serials: string[]): void {
+  const line = scanLine.value
+  if (!line) return
+  line.serials = [...serials]
+  syncLineQty(line)
+  scanOpen.value = false
+  scanLineIndex.value = -1
+}
+
 async function loadMeta(): Promise<void> {
   warehouses.value = await call('warehouse:list', {})
+  userOptions.value = await call('user:options', {})
+  if (!form.createdByUserId && session.session) {
+    form.createdByUserId = session.session.userId
+  }
   if (!isTransfer.value) {
     partners.value = await call('partner:list', { kind: partnerKind.value })
   }
@@ -131,10 +181,12 @@ function addReturnLine(rl: ReturnableLine): void {
     itemId: rl.itemId,
     itemCode: rl.itemCode,
     itemName: rl.itemName,
-    serialManaged: rl.serialManaged,
-    qty: rl.availableQty,
+    serialManaged: true,
+    qty: 0,
     unitPrice: toYuanInput(rl.unitPrice),
     costAmount: null,
+    rebatePerUnit: '0.00',
+    rebateAmount: '0.00',
     refLineId: rl.refLineId,
     serials: [],
     serialInput: '',
@@ -157,7 +209,7 @@ async function findBySerial(): Promise<void> {
     const line = form.lines.find((l) => l.refLineId === hit.lineId)
     if (line && !line.serials.includes(sn)) {
       line.serials.push(sn)
-      line.qty = line.serials.length
+      syncLineQty(line)
     }
   }
   serialFind.value = ''
@@ -177,30 +229,13 @@ function pickItem(line: EditLine, item: ItemRow | null | undefined): void {
   line.itemId = item.id
   line.itemCode = item.code
   line.itemName = item.name
-  line.serialManaged = item.serialManaged
+  line.serialManaged = true
   if (!isTransfer.value) {
     line.unitPrice = toYuanInput(docType.value === 'PURCHASE' ? item.defaultBuyPrice : item.defaultSellPrice)
   }
   line.serials = []
   line.serialInput = ''
-}
-
-function commitSerial(line: EditLine): void {
-  const sn = line.serialInput.trim()
-  if (!sn) return
-  if (line.serials.includes(sn)) {
-    ElMessage.warning(`串号重复：${sn}`)
-    line.serialInput = ''
-    return
-  }
-  line.serials.push(sn)
-  line.qty = line.serials.length
-  line.serialInput = ''
-}
-
-function removeSerial(line: EditLine, sn: string): void {
-  line.serials = line.serials.filter((s) => s !== sn)
-  line.qty = Math.max(1, line.serials.length)
+  syncLineQty(line)
 }
 
 function fromDetail(d: DocDetail): void {
@@ -211,16 +246,19 @@ function fromDetail(d: DocDetail): void {
   form.warehouseId = d.warehouseId
   form.toWarehouseId = d.toWarehouseId ?? undefined
   form.partnerId = d.partnerId ?? undefined
+  form.createdByUserId = d.createdBy
   form.refDocId = d.refDocId ?? undefined
   form.remark = d.remark
   form.lines = d.lines.map((l) => ({
     itemId: l.itemId,
     itemCode: l.itemCode,
     itemName: l.itemName,
-    serialManaged: l.serialManaged,
-    qty: l.qty,
+    serialManaged: true,
+    qty: l.serials.length || l.qty,
     unitPrice: toYuanInput(l.unitPrice),
     costAmount: l.costAmount ?? null,
+    rebatePerUnit: toYuanInput(l.rebatePerUnit ?? 0),
+    rebateAmount: toYuanInput(l.rebateAmount ?? 0),
     refLineId: l.refLineId,
     serials: [...l.serials],
     serialInput: '',
@@ -248,15 +286,15 @@ async function save(): Promise<void> {
     return
   }
   if (!isTransfer.value && !form.partnerId) {
-    ElMessage.warning('请选择往来单位')
+    ElMessage.warning(`请选择${partnerLabel.value}`)
     return
   }
   if (isReturn.value && !form.refDocId) {
     ElMessage.warning('请选择原单')
     return
   }
-  if (form.lines.length === 0 || form.lines.some((l) => !l.itemId)) {
-    ElMessage.warning('请完善明细')
+  if (form.lines.length === 0 || form.lines.some((l) => !l.itemId || l.serials.length === 0)) {
+    ElMessage.warning('请完善明细并扫入串号（数量=串号个数）')
     return
   }
   saving.value = true
@@ -268,13 +306,17 @@ async function save(): Promise<void> {
       ...(isTransfer.value ? { toWarehouseId: form.toWarehouseId } : {}),
       ...(!isTransfer.value ? { partnerId: form.partnerId } : {}),
       ...(isReturn.value ? { refDocId: form.refDocId } : {}),
+      ...(form.createdByUserId ? { createdByUserId: form.createdByUserId } : {}),
       remark: form.remark,
       lines: form.lines.map((l) => ({
         itemId: l.itemId!,
-        qty: l.serialManaged ? l.serials.length || l.qty : l.qty,
+        qty: l.serials.length,
         unitPrice: l.unitPrice,
+        ...(isPurchase.value
+          ? { rebatePerUnit: l.rebatePerUnit, rebateAmount: l.rebateAmount }
+          : {}),
         ...(l.refLineId ? { refLineId: l.refLineId } : {}),
-        serials: l.serialManaged ? l.serials : [],
+        serials: l.serials,
         remark: l.remark,
       })),
     }
@@ -399,7 +441,19 @@ onMounted(load)
             <el-input v-model="serialFind" placeholder="扫码后回车" @keyup.enter="findBySerial" />
           </el-form-item>
         </el-col>
-        <el-col :span="24">
+        <el-col :span="6">
+          <el-form-item label="录入人" required>
+            <el-select v-model="form.createdByUserId" filterable style="width: 100%">
+              <el-option
+                v-for="u in userOptions"
+                :key="u.id"
+                :label="u.displayName || u.username"
+                :value="u.id"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="18">
           <el-form-item label="备注"><el-input v-model="form.remark" maxlength="255" /></el-form-item>
         </el-col>
       </el-row>
@@ -447,43 +501,41 @@ onMounted(load)
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column label="数量" width="100">
-        <template #default="{ row }">
-          <el-input-number
-            v-model="row.qty"
-            :min="1"
-            :disabled="row.serialManaged || !canEdit"
-            controls-position="right"
-            style="width: 100%"
-          />
-        </template>
+      <el-table-column label="数量" width="90" align="right">
+        <template #default="{ row }">{{ row.qty }}</template>
       </el-table-column>
       <el-table-column v-if="!isTransfer" label="单价" width="110">
         <template #default="{ row }">
           <el-input v-model="row.unitPrice" :disabled="lockedPrice || !canEdit" />
         </template>
       </el-table-column>
-      <el-table-column label="串号" min-width="200">
+      <el-table-column v-if="!isTransfer" label="金额" width="100" align="right">
+        <template #default="{ row }">{{ lineAmountYuan(row) }}</template>
+      </el-table-column>
+      <el-table-column v-if="isPurchase" label="单台返利" width="110">
         <template #default="{ row }">
-          <template v-if="row.serialManaged">
-            <div class="serials">
-              <el-tag
-                v-for="sn in row.serials"
-                :key="sn"
-                :closable="canEdit"
-                @close="removeSerial(row, sn)"
-              >
-                {{ sn }}
-              </el-tag>
-            </div>
-            <el-input
-              v-if="canEdit"
-              v-model="row.serialInput"
-              placeholder="扫码后回车"
-              @keyup.enter="commitSerial(row)"
-            />
-          </template>
-          <span v-else class="muted">—</span>
+          <el-input
+            v-model="row.rebatePerUnit"
+            :disabled="!canEdit"
+            @change="syncLineQty(row)"
+          />
+        </template>
+      </el-table-column>
+      <el-table-column v-if="isPurchase" label="返利金额" width="100" align="right">
+        <template #default="{ row }">{{ row.rebateAmount }}</template>
+      </el-table-column>
+      <el-table-column label="串号" min-width="220">
+        <template #default="{ row, $index }">
+          <div
+            class="serial-cell"
+            :class="{ clickable: canEdit }"
+            @click="openScan($index)"
+          >
+            <template v-if="row.serials.length">
+              <el-tag v-for="sn in row.serials" :key="sn" size="small">{{ sn }}</el-tag>
+            </template>
+            <span v-else class="muted">{{ canEdit ? '点击扫串号' : '—' }}</span>
+          </div>
         </template>
       </el-table-column>
       <el-table-column v-if="session.isOwner" label="成本" width="100" align="right">
@@ -495,6 +547,14 @@ onMounted(load)
         </template>
       </el-table-column>
     </el-table>
+
+    <SerialScanDialog
+      v-model="scanOpen"
+      :item-name="scanLine ? `${scanLine.itemCode} ${scanLine.itemName}` : ''"
+      :unit-price-text="scanLine?.unitPrice ?? '0.00'"
+      :initial-serials="scanLine?.serials ?? []"
+      @confirm="onScanConfirm"
+    />
   </div>
 </template>
 
@@ -504,11 +564,15 @@ onMounted(load)
   padding: 12px 12px 0;
   border: 1px solid #ebeef5;
 }
-.serials {
+.serial-cell {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-bottom: 4px;
+  min-height: 28px;
+  align-items: center;
+}
+.serial-cell.clickable {
+  cursor: pointer;
 }
 .muted {
   color: #c0c4cc;

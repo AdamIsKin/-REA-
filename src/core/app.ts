@@ -4,6 +4,7 @@ import type { Clock } from './domain/clock'
 import { createDispatcher, handler, type HandlerMap } from './rpc'
 import { authHandlers } from './auth/handlers'
 import { inventoryHandlers } from './inventory/handlers'
+import { purchaseHandlers } from './inventory/purchase'
 import { masterdataHandlers } from './masterdata/handlers'
 import { backupHandlers, oplogHandlers } from './backup/handlers'
 import { queryHandlers } from './query/handlers'
@@ -35,6 +36,7 @@ export function createCore(opts: CreateCoreOptions) {
     ...authHandlers,
     ...masterdataHandlers,
     ...inventoryHandlers,
+    ...purchaseHandlers,
     ...queryHandlers,
     ...backupHandlers,
     ...oplogHandlers,

@@ -54,3 +54,8 @@ export interface TestEnv {
   call<C extends Channel>(sender: number, channel: C, input: InputOf<C>): OutputOf<C>
   fail<C extends Channel>(sender: number, channel: C, input: InputOf<C>): FailInfo
 }
+
+/** R23：生成 n 个唯一串号，供测试单据数量=串号个数。 */
+export function sns(prefix: string, n: number): string[] {
+  return Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`)
+}

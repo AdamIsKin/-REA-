@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { DOC_TYPE_LABEL, type SerialTrace } from '@shared/dto'
 import { call } from '../../api'
 import { showError } from '../../api/errors'
 
+const route = useRoute()
 const serial = ref('')
 const result = ref<SerialTrace | null>(null)
 
@@ -14,6 +16,15 @@ async function search(): Promise<void> {
     showError(e)
   }
 }
+
+onMounted(() => {
+  const q = route.query['serial']
+  const sn = typeof q === 'string' ? q.trim() : Array.isArray(q) ? String(q[0] ?? '').trim() : ''
+  if (sn) {
+    serial.value = sn
+    void search()
+  }
+})
 </script>
 
 <template>

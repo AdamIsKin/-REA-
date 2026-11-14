@@ -1,17 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { OWNER, setup, type TestEnv } from './helpers'
+import { OWNER, setup, sns, type TestEnv } from './helpers'
 
-function seed(env: TestEnv, serial = false) {
+function seed(env: TestEnv) {
   const { call } = env
   const wh1 = call(OWNER, 'warehouse:save', { code: 'W1', name: '门店仓' })
   const wh2 = call(OWNER, 'warehouse:save', { code: 'W2', name: '备用仓' })
   const supplier = call(OWNER, 'partner:save', { kind: 'supplier', code: 'S1', name: '供应商A' })
   const customer = call(OWNER, 'partner:save', { kind: 'customer', code: 'C1', name: '客户A' })
   const item = call(OWNER, 'item:save', {
-    code: serial ? 'PHONE1' : 'ACC1',
-    name: serial ? '手机' : '配件',
-    serialManaged: serial,
+    code: 'PHONE1',
+    name: '手机',
     defaultBuyPrice: '100',
     defaultSellPrice: '200',
   })
@@ -22,20 +21,21 @@ test('15. 移库后两仓结存正确且成本不变；补录调出仓早出库�
   const env = setup()
   const { call, fail, db } = env
   const { wh1, wh2, supplier, customer, item } = seed(env)
+  const stock = sns('M', 10)
 
   call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-01',
     warehouseId: wh1.id,
     partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 10, unitPrice: '100' }],
+    lines: [{ itemId: item.id, qty: 10, unitPrice: '100', serials: stock }],
   })
   const sale = call(OWNER, 'doc:create', {
     docType: 'SALE',
     bizDate: '2026-11-10',
     warehouseId: wh1.id,
     partnerId: customer.id,
-    lines: [{ itemId: item.id, qty: 2, unitPrice: '200' }],
+    lines: [{ itemId: item.id, qty: 2, unitPrice: '200', serials: stock.slice(0, 2) }],
   })
   const costBefore = sale.lines[0]!.costAmount
 
@@ -44,7 +44,7 @@ test('15. 移库后两仓结存正确且成本不变；补录调出仓早出库�
     bizDate: '2026-11-05',
     warehouseId: wh1.id,
     toWarehouseId: wh2.id,
-    lines: [{ itemId: item.id, qty: 4, unitPrice: '0' }],
+    lines: [{ itemId: item.id, qty: 4, unitPrice: '0', serials: stock.slice(2, 6) }],
   })
 
   const b1 = db.prepare('SELECT qty FROM stock_balance WHERE warehouse_id=? AND item_id=?').get(wh1.id, item.id) as {
@@ -57,22 +57,22 @@ test('15. 移库后两仓结存正确且成本不变；补录调出仓早出库�
   assert.equal(b2.qty, 4)
   assert.equal(call(OWNER, 'doc:get', { id: sale.id }).lines[0]!.costAmount, costBefore)
 
-  // 补录 11-03 从 W1 卖 7：11-03 够，但 11-05 移库后会不够 → 首次变负在移库日
+  // 补录 11-03 从 W1 卖 7（占用将移库的串号）：11-05 移库后会不够
   const e = fail(OWNER, 'doc:create', {
     docType: 'SALE',
     bizDate: '2026-11-03',
     warehouseId: wh1.id,
     partnerId: customer.id,
-    lines: [{ itemId: item.id, qty: 7, unitPrice: '200' }],
+    lines: [{ itemId: item.id, qty: 7, unitPrice: '200', serials: stock.slice(2, 9) }],
   })
   assert.equal(e.code, 'STOCK_NEGATIVE')
   assert.equal(e.details?.['date'], '2026-11-05')
 })
 
-test('16. 手机移库后从原仓卖出该串号报 SERIAL_NOT_AVAILABLE', () => {
+test('16. 移库后从原仓卖出该串号报 SERIAL_NOT_AVAILABLE', () => {
   const env = setup()
   const { call, fail } = env
-  const { wh1, wh2, supplier, customer, item } = seed(env, true)
+  const { wh1, wh2, supplier, customer, item } = seed(env)
   call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-01',
@@ -87,7 +87,6 @@ test('16. 手机移库后从原仓卖出该串号报 SERIAL_NOT_AVAILABLE', () =
     toWarehouseId: wh2.id,
     lines: [{ itemId: item.id, qty: 1, serials: ['SN-T'] }],
   })
-  // W1 再入另一台，保证数量检查通过
   call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-06',
@@ -105,16 +104,17 @@ test('16. 手机移库后从原仓卖出该串号报 SERIAL_NOT_AVAILABLE', () =
   assert.equal(e.code, 'SERIAL_NOT_AVAILABLE')
 })
 
-test('17. 配件采购退货：原批次剩余足够时只扣原批次，差异为 0', () => {
+test('17. 采购退货：退回原单在库串号，成本与金额一致、差异为 0', () => {
   const env = setup()
   const { call } = env
   const { wh1, supplier, item } = seed(env)
+  const stock = sns('PR', 10)
   const purchase = call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-01',
     warehouseId: wh1.id,
     partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 10, unitPrice: '100' }],
+    lines: [{ itemId: item.id, qty: 10, unitPrice: '100', serials: stock }],
   })
   const ret = call(OWNER, 'doc:create', {
     docType: 'PURCHASE_RETURN',
@@ -122,68 +122,75 @@ test('17. 配件采购退货：原批次剩余足够时只扣原批次，差异�
     warehouseId: wh1.id,
     partnerId: supplier.id,
     refDocId: purchase.id,
-    lines: [{ itemId: item.id, qty: 3, refLineId: purchase.lines[0]!.id }],
+    lines: [{ itemId: item.id, qty: 3, refLineId: purchase.lines[0]!.id, serials: stock.slice(0, 3) }],
   })
   assert.equal(ret.lines[0]!.amount, 30000)
-  assert.equal(ret.lines[0]!.costAmount, 30000) // 差异 0
+  assert.equal(ret.lines[0]!.costAmount, 30000)
 })
 
-test('18. 配件采购退货：原批次部分卖出后，先扣原批再 FIFO，差异正确', () => {
+test('18. 采购退货只能退原单仍在库串号；已售出串号不可退', () => {
   const env = setup()
-  const { call } = env
+  const { call, fail } = env
   const { wh1, supplier, customer, item } = seed(env)
+  const stock = sns('PS', 5)
   const p1 = call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-01',
     warehouseId: wh1.id,
     partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 5, unitPrice: '10.00' }],
+    lines: [{ itemId: item.id, qty: 5, unitPrice: '10.00', serials: stock }],
   })
-  call(OWNER, 'doc:create', {
-    docType: 'PURCHASE',
-    bizDate: '2026-11-02',
-    warehouseId: wh1.id,
-    partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 5, unitPrice: '12.00' }],
-  })
-  // 卖掉原批 3 件
   call(OWNER, 'doc:create', {
     docType: 'SALE',
     bizDate: '2026-11-03',
     warehouseId: wh1.id,
     partnerId: customer.id,
-    lines: [{ itemId: item.id, qty: 3, unitPrice: '20' }],
+    lines: [{ itemId: item.id, qty: 3, unitPrice: '20', serials: stock.slice(0, 3) }],
   })
-  // 退原单 4 件：原批剩 2 → 扣 2×10；再 FIFO 扣 2×12；成本 20+24=44；金额 4×10=40；差异 -4 元=-400 分
+  // 退已售串号 → 串号不在仓
+  assert.equal(
+    fail(OWNER, 'doc:create', {
+      docType: 'PURCHASE_RETURN',
+      bizDate: '2026-11-05',
+      warehouseId: wh1.id,
+      partnerId: supplier.id,
+      refDocId: p1.id,
+      lines: [{ itemId: item.id, qty: 1, refLineId: p1.lines[0]!.id, serials: [stock[0]!] }],
+    }).code,
+    'SERIAL_NOT_AVAILABLE',
+  )
+  // 退剩余 2 台成功
   const ret = call(OWNER, 'doc:create', {
     docType: 'PURCHASE_RETURN',
     bizDate: '2026-11-05',
     warehouseId: wh1.id,
     partnerId: supplier.id,
     refDocId: p1.id,
-    lines: [{ itemId: item.id, qty: 4, refLineId: p1.lines[0]!.id }],
+    lines: [{ itemId: item.id, qty: 2, refLineId: p1.lines[0]!.id, serials: stock.slice(3, 5) }],
   })
-  assert.equal(ret.lines[0]!.amount, 4000)
-  assert.equal(ret.lines[0]!.costAmount, 4400)
+  assert.equal(ret.lines[0]!.amount, 2000)
+  assert.equal(ret.lines[0]!.costAmount, 2000)
 })
 
-test('19. 销售退货按原成本新建批次；分多次退完时成本之和等于原销售成本', () => {
+test('19. 销售退货按原成本回库；分多次退完时成本之和等于原销售成本', () => {
   const env = setup()
   const { call } = env
   const { wh1, supplier, customer, item } = seed(env)
+  const stock = sns('SR', 10)
   call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-01',
     warehouseId: wh1.id,
     partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 10, unitPrice: '10.00' }],
+    lines: [{ itemId: item.id, qty: 10, unitPrice: '10.00', serials: stock }],
   })
+  const sold = stock.slice(0, 5)
   const sale = call(OWNER, 'doc:create', {
     docType: 'SALE',
     bizDate: '2026-11-05',
     warehouseId: wh1.id,
     partnerId: customer.id,
-    lines: [{ itemId: item.id, qty: 5, unitPrice: '20' }],
+    lines: [{ itemId: item.id, qty: 5, unitPrice: '20', serials: sold }],
   })
   const saleCost = sale.lines[0]!.costAmount!
   const r1 = call(OWNER, 'doc:create', {
@@ -192,7 +199,7 @@ test('19. 销售退货按原成本新建批次；分多次退完时成本之和�
     warehouseId: wh1.id,
     partnerId: customer.id,
     refDocId: sale.id,
-    lines: [{ itemId: item.id, qty: 2, refLineId: sale.lines[0]!.id }],
+    lines: [{ itemId: item.id, qty: 2, refLineId: sale.lines[0]!.id, serials: sold.slice(0, 2) }],
   })
   const r2 = call(OWNER, 'doc:create', {
     docType: 'SALE_RETURN',
@@ -200,7 +207,7 @@ test('19. 销售退货按原成本新建批次；分多次退完时成本之和�
     warehouseId: wh1.id,
     partnerId: customer.id,
     refDocId: sale.id,
-    lines: [{ itemId: item.id, qty: 3, refLineId: sale.lines[0]!.id }],
+    lines: [{ itemId: item.id, qty: 3, refLineId: sale.lines[0]!.id, serials: sold.slice(2, 5) }],
   })
   assert.equal(r1.lines[0]!.costAmount! + r2.lines[0]!.costAmount!, saleCost)
 })
@@ -209,12 +216,13 @@ test('20. 退货数量超过可退数量报 RETURN_QTY_EXCEEDED', () => {
   const env = setup()
   const { call, fail } = env
   const { wh1, supplier, item } = seed(env)
+  const stock = sns('RQ', 3)
   const p = call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-01',
     warehouseId: wh1.id,
     partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 3, unitPrice: '10' }],
+    lines: [{ itemId: item.id, qty: 3, unitPrice: '10', serials: stock }],
   })
   const e = fail(OWNER, 'doc:create', {
     docType: 'PURCHASE_RETURN',
@@ -222,7 +230,7 @@ test('20. 退货数量超过可退数量报 RETURN_QTY_EXCEEDED', () => {
     warehouseId: wh1.id,
     partnerId: supplier.id,
     refDocId: p.id,
-    lines: [{ itemId: item.id, qty: 5, refLineId: p.lines[0]!.id }],
+    lines: [{ itemId: item.id, qty: 5, refLineId: p.lines[0]!.id, serials: sns('XX', 5) }],
   })
   assert.equal(e.code, 'RETURN_QTY_EXCEEDED')
 })
@@ -231,12 +239,13 @@ test('21. 原单已被退货引用时反过账原单报 DOC_REFERENCED', () => {
   const env = setup()
   const { call, fail } = env
   const { wh1, supplier, item } = seed(env)
+  const stock = sns('RF', 5)
   const p = call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-01',
     warehouseId: wh1.id,
     partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 5, unitPrice: '10' }],
+    lines: [{ itemId: item.id, qty: 5, unitPrice: '10', serials: stock }],
   })
   const ret = call(OWNER, 'doc:create', {
     docType: 'PURCHASE_RETURN',
@@ -244,10 +253,9 @@ test('21. 原单已被退货引用时反过账原单报 DOC_REFERENCED', () => {
     warehouseId: wh1.id,
     partnerId: supplier.id,
     refDocId: p.id,
-    lines: [{ itemId: item.id, qty: 1, refLineId: p.lines[0]!.id }],
+    lines: [{ itemId: item.id, qty: 1, refLineId: p.lines[0]!.id, serials: [stock[0]!] }],
   })
   assert.equal(fail(OWNER, 'doc:unpost', { id: p.id }).code, 'DOC_REFERENCED')
-  // D38：退货反过账成草稿后仍占用原单行外键，原单仍不可反过账/改明细。
   call(OWNER, 'doc:unpost', { id: ret.id })
   assert.equal(fail(OWNER, 'doc:unpost', { id: p.id }).code, 'DOC_REFERENCED')
   assert.equal(
@@ -257,29 +265,31 @@ test('21. 原单已被退货引用时反过账原单报 DOC_REFERENCED', () => {
       bizDate: '2026-11-01',
       warehouseId: wh1.id,
       partnerId: supplier.id,
-      lines: [{ itemId: item.id, qty: 4, unitPrice: '10' }],
+      lines: [{ itemId: item.id, qty: 4, unitPrice: '10', serials: stock.slice(0, 4) }],
     }).code,
     'DOC_REFERENCED',
   )
 })
 
-test('22. 补录导致原销售成本变化后，销售退货批次金额随之更新', () => {
+test('22. 串号销售成本不因后续无关采购而改变；退货成本跟随原销售', () => {
   const env = setup()
   const { call } = env
   const { wh1, supplier, customer, item } = seed(env)
+  const stock = sns('SC', 10)
   call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-05',
     warehouseId: wh1.id,
     partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 10, unitPrice: '10.00' }],
+    lines: [{ itemId: item.id, qty: 10, unitPrice: '10.00', serials: stock }],
   })
+  const sold = stock.slice(0, 2)
   const sale = call(OWNER, 'doc:create', {
     docType: 'SALE',
     bizDate: '2026-11-10',
     warehouseId: wh1.id,
     partnerId: customer.id,
-    lines: [{ itemId: item.id, qty: 2, unitPrice: '20' }],
+    lines: [{ itemId: item.id, qty: 2, unitPrice: '20', serials: sold }],
   })
   const ret = call(OWNER, 'doc:create', {
     docType: 'SALE_RETURN',
@@ -287,20 +297,20 @@ test('22. 补录导致原销售成本变化后，销售退货批次金额随之�
     warehouseId: wh1.id,
     partnerId: customer.id,
     refDocId: sale.id,
-    lines: [{ itemId: item.id, qty: 2, refLineId: sale.lines[0]!.id }],
+    lines: [{ itemId: item.id, qty: 2, refLineId: sale.lines[0]!.id, serials: sold }],
   })
   assert.equal(ret.lines[0]!.costAmount, 2000)
 
-  // 补录更便宜的采购 → 销售成本变 2×8=16；退货批次应跟着变成 1600
+  // 补录更早、更便宜的其它串号，不影响已售串号成本
   call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
     bizDate: '2026-11-01',
     warehouseId: wh1.id,
     partnerId: supplier.id,
-    lines: [{ itemId: item.id, qty: 10, unitPrice: '8.00' }],
+    lines: [{ itemId: item.id, qty: 10, unitPrice: '8.00', serials: sns('CHEAP', 10) }],
   })
   const afterSale = call(OWNER, 'doc:get', { id: sale.id })
   const afterRet = call(OWNER, 'doc:get', { id: ret.id })
-  assert.equal(afterSale.lines[0]!.costAmount, 1600)
-  assert.equal(afterRet.lines[0]!.costAmount, 1600)
+  assert.equal(afterSale.lines[0]!.costAmount, 2000)
+  assert.equal(afterRet.lines[0]!.costAmount, 2000)
 })

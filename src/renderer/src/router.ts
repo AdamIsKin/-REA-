@@ -19,7 +19,14 @@ const routes: RouteRecordRaw[] = [
     redirect: '/stock',
     children: [
       { path: 'items', component: () => import('./views/master/ItemsView.vue'), meta: { title: '商品' } },
+      { path: 'categories', component: () => import('./views/master/CategoryView.vue'), meta: { title: '商品分类' } },
+      { path: 'brands', component: () => import('./views/master/BrandView.vue'), meta: { title: '品牌' } },
       { path: 'warehouses', component: () => import('./views/master/WarehousesView.vue'), meta: { title: '仓库' } },
+      {
+        path: 'purchase/details',
+        component: () => import('./views/docs/PurchaseDetailView.vue'),
+        meta: { title: '入库明细' },
+      },
       {
         path: 'partners/:kind(supplier|customer)',
         component: () => import('./views/master/PartnersView.vue'),

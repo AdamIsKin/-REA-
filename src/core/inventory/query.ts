@@ -59,6 +59,7 @@ interface ListRow {
   total_qty: number
   total_amount: number
   total_cost: number
+  created_by: number
   created_by_name: string
   created_at: string
   posted_at: string | null
@@ -82,6 +83,7 @@ function toSummary(r: ListRow, role: Role): DocSummary {
     remark: r.remark,
     totalQty: r.total_qty,
     totalAmount: cents(r.total_amount),
+    createdBy: r.created_by,
     createdByName: r.created_by_name || '',
     createdAt: r.created_at,
     postedAt: r.posted_at,
@@ -168,6 +170,8 @@ export function getDocDetail(db: DB, id: number, role: Role): DocDetail {
       qty: l.qty,
       unitPrice: cents(l.unit_price),
       amount: cents(l.amount),
+      rebatePerUnit: cents(l.rebate_per_unit ?? 0),
+      rebateAmount: cents(l.rebate_amount ?? 0),
       refLineId: l.ref_line_id,
       remark: l.remark,
       serials: serials.get(l.id) ?? [],
@@ -195,6 +199,7 @@ export function getDocDetail(db: DB, id: number, role: Role): DocDetail {
       total_qty: totalQty,
       total_amount: totalAmount,
       total_cost: totalCost,
+      created_by: doc.created_by,
       created_by_name: user.display_name || user.username,
       created_at: doc.created_at,
       posted_at: doc.posted_at,
