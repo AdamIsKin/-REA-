@@ -3,6 +3,7 @@ import { SessionStore, type CoreContext } from './context'
 import type { Clock } from './domain/clock'
 import { createDispatcher, handler, type HandlerMap } from './rpc'
 import { authHandlers } from './auth/handlers'
+import { inventoryHandlers } from './inventory/handlers'
 import { masterdataHandlers } from './masterdata/handlers'
 import { currentSchemaVersion } from './db/migrate'
 
@@ -31,6 +32,7 @@ export function createCore(opts: CreateCoreOptions) {
     })),
     ...authHandlers,
     ...masterdataHandlers,
+    ...inventoryHandlers,
   }
 
   return { core, dispatch: createDispatcher(core, handlers) }

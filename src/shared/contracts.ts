@@ -12,7 +12,19 @@
  */
 import { z } from 'zod'
 import { parseYuan, type Cents } from './money'
-import type { AuthStatus, ItemRow, PartnerRow, SessionInfo, SystemInfo, UserRow, WarehouseRow } from './dto'
+import type {
+  AuthStatus,
+  DocDetail,
+  DocSummary,
+  ItemRow,
+  Paged,
+  PartnerRow,
+  Returnable,
+  SessionInfo,
+  SystemInfo,
+  UserRow,
+  WarehouseRow,
+} from './dto'
 
 // ───────────────────────────── 通用片段 ─────────────────────────────
 
@@ -32,6 +44,43 @@ export const yuanNonNegative = z.string().transform((s, ctx): Cents => {
 })
 
 const password = z.string().min(6, '密码至少 6 位').max(64)
+
+const docType = z.enum(['PURCHASE', 'SALE', 'TRANSFER', 'PURCHASE_RETURN', 'SALE_RETURN'])
+const isoDate = z.iso.date('日期格式应为 YYYY-MM-DD')
+/** 串号（IMEI 等）：去掉首尾空白；扫码枪可能带入的内部空格也视为非法输入。 */
+const serial = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^\S+$/, '串号不能包含空格')
+
+/**
+ * 单据明细输入。
+ * - unitPrice 用 prefault：缺省时按输入值 '0' 走一遍 transform（zod 4 的 default 会跳过 transform）；
+ * - 退货行的单价由业务进程取原单单价（D25），移库为 0，页面传什么都会被覆盖。
+ */
+const docLineInput = z.object({
+  itemId: id,
+  qty: z.number().int().positive('数量必须大于 0').max(1_000_000),
+  unitPrice: yuanNonNegative.prefault('0'),
+  refLineId: id.optional(),
+  serials: z.array(serial).max(10_000).default([]),
+  remark: text(255).default(''),
+})
+
+const docInput = z.object({
+  docType,
+  bizDate: isoDate,
+  warehouseId: id,
+  toWarehouseId: id.optional(),
+  partnerId: id.optional(),
+  refDocId: id.optional(),
+  remark: text(255).default(''),
+  lines: z.array(docLineInput).min(1, '至少要有一行明细').max(1000),
+})
+
+export type DocInputParsed = z.output<typeof docInput>
 
 // ───────────────────────────── 通道定义 ─────────────────────────────
 
@@ -120,6 +169,30 @@ export const schemas = {
     enabled: z.boolean().default(true),
   }),
 
+  // —— 单据 ——
+  'doc:list': z.object({
+    docType: docType.optional(),
+    status: z.enum(['draft', 'posted']).optional(),
+    dateFrom: isoDate.optional(),
+    dateTo: isoDate.optional(),
+    partnerId: id.optional(),
+    warehouseId: id.optional(),
+    /** 按单号、备注模糊查找。 */
+    keyword: text(64).default(''),
+    page: z.number().int().min(1).default(1),
+    pageSize: z.number().int().min(1).max(500).default(50),
+  }),
+  'doc:get': z.object({ id }),
+  /** 保存即过账（R2）。 */
+  'doc:create': docInput,
+  /** 修改：已过账单据在同一事务内反过账 → 替换 → 重新过账（R3，仅老板）；草稿直接替换后过账。 */
+  'doc:update': docInput.extend({ id }),
+  'doc:unpost': z.object({ id }),
+  'doc:post': z.object({ id }),
+  'doc:returnable': z.object({ refDocId: id }),
+  /** 退货录入时扫串号自动找原单（R14）：在已过账的采购 / 销售单中找最近一次包含该串号的行。 */
+  'doc:findBySerial': z.object({ serial, docType: z.enum(['PURCHASE', 'SALE']) }),
+
   // —— 设置（店名、打印抬头等） ——
   'setting:getAll': z.object({}),
   'setting:save': z.object({ values: z.record(z.string().max(64), z.string().max(1000)) }),
@@ -145,6 +218,14 @@ export interface Outputs {
   'item:save': ItemRow
   'partner:list': PartnerRow[]
   'partner:save': PartnerRow
+  'doc:list': Paged<DocSummary>
+  'doc:get': DocDetail
+  'doc:create': DocDetail
+  'doc:update': DocDetail
+  'doc:unpost': DocDetail
+  'doc:post': DocDetail
+  'doc:returnable': Returnable
+  'doc:findBySerial': { docId: number; docNo: string; lineId: number } | null
   'setting:getAll': Record<string, string>
   'setting:save': null
 }

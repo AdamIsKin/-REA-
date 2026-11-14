@@ -84,3 +84,86 @@ export interface Paged<T> {
 }
 
 export type QtyValue = Qty
+
+// ═════════════════════════════ 单据 ═════════════════════════════
+
+export type DocType = 'PURCHASE' | 'SALE' | 'TRANSFER' | 'PURCHASE_RETURN' | 'SALE_RETURN'
+export type DocStatus = 'draft' | 'posted'
+
+export const DOC_TYPE_LABEL: Readonly<Record<DocType, string>> = {
+  PURCHASE: '采购入库',
+  SALE: '销售出库',
+  TRANSFER: '移库',
+  PURCHASE_RETURN: '采购退货',
+  SALE_RETURN: '销售退货',
+}
+
+export interface DocLineDto {
+  id: number
+  lineNo: number
+  itemId: number
+  itemCode: string
+  itemName: string
+  itemSpec: string
+  unit: string
+  serialManaged: boolean
+  qty: number
+  unitPrice: Cents
+  amount: Cents
+  refLineId: number | null
+  /** 仅老板会话返回（R21）。 */
+  costAmount?: Cents
+  remark: string
+  serials: string[]
+}
+
+export interface DocSummary {
+  id: number
+  docNo: string
+  docType: DocType
+  bizDate: string
+  status: DocStatus
+  warehouseId: number
+  warehouseName: string
+  toWarehouseId: number | null
+  toWarehouseName: string | null
+  partnerId: number | null
+  partnerName: string | null
+  refDocId: number | null
+  refDocNo: string | null
+  remark: string
+  totalQty: number
+  totalAmount: Cents
+  /** 仅老板会话返回。 */
+  totalCost?: Cents
+  createdByName: string
+  createdAt: string
+  postedAt: string | null
+}
+
+export interface DocDetail extends DocSummary {
+  lines: DocLineDto[]
+}
+
+/** 退货录入用：原单每一行的可退情况。 */
+export interface ReturnableLine {
+  refLineId: number
+  lineNo: number
+  itemId: number
+  itemCode: string
+  itemName: string
+  itemSpec: string
+  unit: string
+  serialManaged: boolean
+  qty: number
+  returnedQty: number
+  availableQty: number
+  unitPrice: Cents
+  /** 原单行中尚未被已过账退货单退掉的串号。 */
+  availableSerials: string[]
+}
+
+export interface Returnable {
+  refDoc: DocSummary
+  lines: ReturnableLine[]
+}

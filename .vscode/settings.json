@@ -1,0 +1,8 @@
+{
+  // Vite / electron-vite 的入口 HTML 会引用 .ts 模块，内置 HTML 校验会误报，关掉脚本校验即可。
+  "html.validate.scripts": false,
+  "html.validate.styles": false,
+  // 本目录才是真正的项目根；从上级 MyPro 打开时也让 TS 用这里的配置。
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true
+}

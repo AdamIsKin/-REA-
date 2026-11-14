@@ -80,6 +80,19 @@ const active = computed(() => {
   return best || route.path
 })
 
+const DOC_TITLES: Record<string, string> = {
+  PURCHASE: '采购入库',
+  SALE: '销售出库',
+  TRANSFER: '移库',
+  PURCHASE_RETURN: '采购退货',
+  SALE_RETURN: '销售退货',
+}
+
+const pageTitle = computed(() => {
+  const type = typeof route.params['type'] === 'string' ? route.params['type'] : ''
+  return DOC_TITLES[type] ?? (route.meta.title as string | undefined) ?? ''
+})
+
 async function logout(): Promise<void> {
   await ElMessageBox.confirm('确定退出登录？', '提示', { type: 'warning' })
   await store.logout()
@@ -91,7 +104,8 @@ async function logout(): Promise<void> {
   <el-container class="layout">
     <el-aside width="180px" class="aside">
       <div class="brand">库存管理</div>
-      <el-menu :default-active="active" router :default-openeds="menu.map((g) => g.title)">
+      <!-- key 绑 active：Element Plus 的 default-active 只读初次值，路由变化时需重建才能高亮正确项 -->
+      <el-menu :key="active" :default-active="active" router :default-openeds="menu.map((g) => g.title)">
         <el-sub-menu v-for="g in menu" :key="g.title" :index="g.title">
           <template #title>{{ g.title }}</template>
           <el-menu-item v-for="i in g.items" :key="i.path" :index="i.path">{{ i.title }}</el-menu-item>
@@ -100,7 +114,7 @@ async function logout(): Promise<void> {
     </el-aside>
     <el-container>
       <el-header class="header" height="48px">
-        <span class="title">{{ route.meta.title }}</span>
+        <span class="title">{{ pageTitle }}</span>
         <span class="spacer" />
         <span class="user"> {{ store.session?.displayName }}（{{ store.isOwner ? '老板' : '店员' }}） </span>
         <el-button link type="primary" @click="logout">退出</el-button>
