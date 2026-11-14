@@ -238,7 +238,7 @@ test('21. 原单已被退货引用时反过账原单报 DOC_REFERENCED', () => {
     partnerId: supplier.id,
     lines: [{ itemId: item.id, qty: 5, unitPrice: '10' }],
   })
-  call(OWNER, 'doc:create', {
+  const ret = call(OWNER, 'doc:create', {
     docType: 'PURCHASE_RETURN',
     bizDate: '2026-11-05',
     warehouseId: wh1.id,
@@ -247,6 +247,20 @@ test('21. 原单已被退货引用时反过账原单报 DOC_REFERENCED', () => {
     lines: [{ itemId: item.id, qty: 1, refLineId: p.lines[0]!.id }],
   })
   assert.equal(fail(OWNER, 'doc:unpost', { id: p.id }).code, 'DOC_REFERENCED')
+  // D38：退货反过账成草稿后仍占用原单行外键，原单仍不可反过账/改明细。
+  call(OWNER, 'doc:unpost', { id: ret.id })
+  assert.equal(fail(OWNER, 'doc:unpost', { id: p.id }).code, 'DOC_REFERENCED')
+  assert.equal(
+    fail(OWNER, 'doc:update', {
+      id: p.id,
+      docType: 'PURCHASE',
+      bizDate: '2026-11-01',
+      warehouseId: wh1.id,
+      partnerId: supplier.id,
+      lines: [{ itemId: item.id, qty: 4, unitPrice: '10' }],
+    }).code,
+    'DOC_REFERENCED',
+  )
 })
 
 test('22. 补录导致原销售成本变化后，销售退货批次金额随之更新', () => {

@@ -41,9 +41,13 @@ function runCost(db: DB, aff: Affected, userId: number, now: string, reason: str
   }
 }
 
+/**
+ * R19 扩展：任意状态的退货单（含草稿）都占用原单行的外键引用。
+ * 只拦已过账时，反过账退货留下的草稿仍指向原单行，随后 replaceLines 删行会触发 SQLITE_CONSTRAINT_FOREIGNKEY。
+ */
 function assertNotReferenced(db: DB, docId: number): void {
   const refs = db
-    .prepare(`SELECT doc_no FROM doc WHERE ref_doc_id = ? AND status = 'posted'`)
+    .prepare(`SELECT doc_no FROM doc WHERE ref_doc_id = ? ORDER BY id`)
     .all(docId) as { doc_no: string }[]
   if (refs.length > 0) throw new BizError('DOC_REFERENCED', { docNos: refs.map((r) => r.doc_no) })
 }

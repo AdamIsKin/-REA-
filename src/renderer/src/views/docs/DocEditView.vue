@@ -70,7 +70,12 @@ const serialFind = ref('')
 const partnerKind = computed(() =>
   docType.value === 'PURCHASE' || docType.value === 'PURCHASE_RETURN' ? 'supplier' : 'customer',
 )
-const readOnlyPosted = computed(() => form.status === 'posted' && !isNew.value)
+/** 新建：店员/老板均可编；已过账：只读；草稿：仅老板可编（R3，与 doc:update 一致）。 */
+const canEdit = computed(() => {
+  if (isNew.value) return true
+  if (form.status === 'posted') return false
+  return session.isOwner
+})
 const lockedPrice = computed(() => isTransfer.value || isReturn.value)
 
 function emptyLine(): EditLine {
@@ -328,13 +333,13 @@ onMounted(load)
       <span class="spacer" />
       <el-button v-if="form.id" @click="printDoc(false)">打印</el-button>
       <el-button v-if="form.id" @click="printDoc(true)">导出 PDF</el-button>
-      <el-button v-if="readOnlyPosted && session.isOwner" type="warning" @click="doUnpost">反过账</el-button>
-      <el-button v-if="!readOnlyPosted || form.status === 'draft'" type="primary" :loading="saving" @click="save">
-        保存并过账
+      <el-button v-if="form.status === 'posted' && !isNew && session.isOwner" type="warning" @click="doUnpost">
+        反过账
       </el-button>
+      <el-button v-if="canEdit" type="primary" :loading="saving" @click="save">保存并过账</el-button>
     </div>
 
-    <el-form label-width="84px" class="head" :disabled="readOnlyPosted && form.status === 'posted'">
+    <el-form label-width="84px" class="head" :disabled="!canEdit">
       <el-row :gutter="12">
         <el-col :span="6">
           <el-form-item label="单号"><el-input :model-value="form.docNo || '（保存后生成）'" disabled /></el-form-item>
@@ -400,7 +405,7 @@ onMounted(load)
       </el-row>
     </el-form>
 
-    <div v-if="isReturn && !(readOnlyPosted && form.status === 'posted')" class="toolbar">
+    <div v-if="isReturn && canEdit" class="toolbar">
       <span>可退明细：</span>
       <el-button
         v-for="rl in returnable"
@@ -415,13 +420,13 @@ onMounted(load)
     <div class="toolbar">
       <strong>{{ title }}明细</strong>
       <span class="spacer" />
-      <el-button v-if="!isReturn && !(readOnlyPosted && form.status === 'posted')" @click="addLine">加行</el-button>
+      <el-button v-if="!isReturn && canEdit" @click="addLine">加行</el-button>
     </div>
 
     <el-table :data="form.lines" border style="width: 100%">
       <el-table-column label="商品" min-width="200">
         <template #default="{ row }">
-          <template v-if="isReturn || (readOnlyPosted && form.status === 'posted')">
+          <template v-if="isReturn || !canEdit">
             {{ row.itemCode }} {{ row.itemName }}
           </template>
           <el-select
@@ -447,7 +452,7 @@ onMounted(load)
           <el-input-number
             v-model="row.qty"
             :min="1"
-            :disabled="row.serialManaged || (readOnlyPosted && form.status === 'posted')"
+            :disabled="row.serialManaged || !canEdit"
             controls-position="right"
             style="width: 100%"
           />
@@ -455,7 +460,7 @@ onMounted(load)
       </el-table-column>
       <el-table-column v-if="!isTransfer" label="单价" width="110">
         <template #default="{ row }">
-          <el-input v-model="row.unitPrice" :disabled="lockedPrice || (readOnlyPosted && form.status === 'posted')" />
+          <el-input v-model="row.unitPrice" :disabled="lockedPrice || !canEdit" />
         </template>
       </el-table-column>
       <el-table-column label="串号" min-width="200">
@@ -465,14 +470,14 @@ onMounted(load)
               <el-tag
                 v-for="sn in row.serials"
                 :key="sn"
-                :closable="!(readOnlyPosted && form.status === 'posted')"
+                :closable="canEdit"
                 @close="removeSerial(row, sn)"
               >
                 {{ sn }}
               </el-tag>
             </div>
             <el-input
-              v-if="!(readOnlyPosted && form.status === 'posted')"
+              v-if="canEdit"
               v-model="row.serialInput"
               placeholder="扫码后回车"
               @keyup.enter="commitSerial(row)"
@@ -486,14 +491,7 @@ onMounted(load)
       </el-table-column>
       <el-table-column label="操作" width="70">
         <template #default="{ $index }">
-          <el-button
-            v-if="!(readOnlyPosted && form.status === 'posted')"
-            link
-            type="danger"
-            @click="removeLine($index)"
-          >
-            删
-          </el-button>
+          <el-button v-if="canEdit" link type="danger" @click="removeLine($index)">删</el-button>
         </template>
       </el-table-column>
     </el-table>

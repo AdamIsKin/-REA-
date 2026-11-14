@@ -25,7 +25,8 @@ export const inventoryHandlers = {
     return getDocDetail(ctx.core.db, input.id, ctx.session.role)
   }),
 
-  'doc:post': handler('doc:post', 'user', (ctx, input) => {
+  // R3：反过账后的重新过账仅老板；新建单据走 doc:create（user 可调）。
+  'doc:post': handler('doc:post', 'owner', (ctx, input) => {
     inTransaction(ctx.core.db, () => post(ctx.core.db, ctx.core.clock, ctx.session, input.id))
     return getDocDetail(ctx.core.db, input.id, ctx.session.role)
   }),

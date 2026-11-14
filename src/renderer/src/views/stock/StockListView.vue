@@ -17,6 +17,15 @@ async function load(): Promise<void> {
   rows.value = await call('stock:list', { ...query })
 }
 
+/**
+ * R10/D28：库存金额只到商品维度。列表按「仓库×商品」分行时，同一商品多仓会重复同一个合计；
+ * 仅在该商品首次出现的行显示金额，其余行显示 —，避免当成「本仓库存金额」。
+ */
+function isFirstItemRow(row: StockRow, index: number): boolean {
+  const prev = rows.value[index - 1]
+  return !prev || prev.itemId !== row.itemId
+}
+
 async function doExport(): Promise<void> {
   try {
     await exportExcel({
@@ -30,7 +39,16 @@ async function doExport(): Promise<void> {
         { header: '单位', value: (r: StockRow) => r.unit },
         { header: '数量', value: (r: StockRow) => r.qty },
         ...(session.isOwner
-          ? [{ header: '库存金额', value: (r: StockRow) => (r.amount == null ? '' : formatCents(r.amount)) }]
+          ? [
+              {
+                header: '商品库存金额',
+                value: (r: StockRow) => {
+                  const idx = rows.value.indexOf(r)
+                  if (idx < 0 || !isFirstItemRow(r, idx)) return ''
+                  return r.amount == null ? '' : formatCents(r.amount)
+                },
+              },
+            ]
           : []),
       ],
       rows: rows.value,
@@ -67,8 +85,10 @@ onMounted(async () => {
       <el-table-column label="数量" width="90" align="right">
         <template #default="{ row }">{{ row.qty }}</template>
       </el-table-column>
-      <el-table-column v-if="session.isOwner" label="库存金额(商品合计)" width="160" align="right">
-        <template #default="{ row }">{{ yuan(row.amount) }}</template>
+      <el-table-column v-if="session.isOwner" label="商品库存金额" width="130" align="right">
+        <template #default="{ row, $index }">
+          {{ isFirstItemRow(row, $index) ? yuan(row.amount) : '—' }}
+        </template>
       </el-table-column>
     </el-table>
   </div>
