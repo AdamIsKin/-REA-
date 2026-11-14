@@ -167,3 +167,72 @@ export interface Returnable {
   refDoc: DocSummary
   lines: ReturnableLine[]
 }
+
+// ═════════════════════════════ 查询与报表（M5） ═════════════════════════════
+
+export interface StockRow {
+  warehouseId: number
+  warehouseName: string
+  itemId: number
+  itemCode: string
+  itemName: string
+  itemSpec: string
+  unit: string
+  serialManaged: boolean
+  qty: number
+  /** 仅老板：该商品全部仓库合计的批次剩余金额（R10/U9，不分仓库）。 */
+  amount?: Cents
+}
+
+export interface StockMoveRow {
+  id: number
+  bizDate: string
+  docId: number
+  docNo: string
+  docType: DocType
+  warehouseId: number
+  warehouseName: string
+  itemId: number
+  itemCode: string
+  itemName: string
+  qty: number
+}
+
+export interface SerialTraceEvent {
+  bizDate: string
+  docId: number
+  docNo: string
+  docType: DocType
+  warehouseId: number
+  warehouseName: string
+  delta: number
+  running: number
+}
+
+export interface SerialTrace {
+  serial: string
+  itemId: number | null
+  itemCode: string | null
+  itemName: string | null
+  /** 当前所在仓库；不在库则为 null。 */
+  currentWarehouseId: number | null
+  currentWarehouseName: string | null
+  events: SerialTraceEvent[]
+}
+
+export interface ProfitRow {
+  key: string
+  label: string
+  salesAmount: Cents
+  salesCost: Cents
+  salesProfit: Cents
+  purchaseReturnVariance: Cents
+}
+
+export interface ProfitReport {
+  dateFrom: string
+  dateTo: string
+  dimension: 'day' | 'item'
+  rows: ProfitRow[]
+  totals: Omit<ProfitRow, 'key' | 'label'>
+}

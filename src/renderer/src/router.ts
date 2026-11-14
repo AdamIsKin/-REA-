@@ -34,15 +34,16 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '设置', owner: true },
       },
       { path: 'password', component: () => import('./views/system/PasswordView.vue'), meta: { title: '修改密码' } },
-      { path: 'stock', component: () => import('./views/HomeView.vue'), meta: { title: '库存查询' } },
-
-      // M2：采购 / 销售；移库与退货列表仍进同一列表页（内部提示开发中）。
+      { path: 'stock', component: () => import('./views/stock/StockListView.vue'), meta: { title: '库存查询' } },
       { path: 'docs/:type', component: () => import('./views/docs/DocsListView.vue'), meta: { title: '单据' } },
       { path: 'docs/:type/:id', component: () => import('./views/docs/DocEditView.vue'), meta: { title: '单据编辑' } },
-
-      { path: 'serials', component: placeholder, meta: { title: '串号追溯', ready: false } },
-      { path: 'moves', component: placeholder, meta: { title: '库存流水', ready: false } },
-      { path: 'report/profit', component: placeholder, meta: { title: '毛利报表', owner: true, ready: false } },
+      { path: 'serials', component: () => import('./views/stock/SerialTraceView.vue'), meta: { title: '串号追溯' } },
+      { path: 'moves', component: () => import('./views/stock/MovesView.vue'), meta: { title: '库存流水' } },
+      {
+        path: 'report/profit',
+        component: () => import('./views/report/ProfitView.vue'),
+        meta: { title: '毛利报表', owner: true },
+      },
       { path: 'backup', component: placeholder, meta: { title: '备份与恢复', owner: true, ready: false } },
       { path: 'oplog', component: placeholder, meta: { title: '操作日志', owner: true, ready: false } },
     ],

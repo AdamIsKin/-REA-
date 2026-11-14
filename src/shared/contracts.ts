@@ -19,8 +19,12 @@ import type {
   ItemRow,
   Paged,
   PartnerRow,
+  ProfitReport,
   Returnable,
+  SerialTrace,
   SessionInfo,
+  StockMoveRow,
+  StockRow,
   SystemInfo,
   UserRow,
   WarehouseRow,
@@ -193,6 +197,27 @@ export const schemas = {
   /** 退货录入时扫串号自动找原单（R14）：在已过账的采购 / 销售单中找最近一次包含该串号的行。 */
   'doc:findBySerial': z.object({ serial, docType: z.enum(['PURCHASE', 'SALE']) }),
 
+  // —— 查询与报表 ——
+  'stock:list': z.object({
+    warehouseId: id.optional(),
+    keyword: text(64).default(''),
+    onlyPositive: z.boolean().default(true),
+  }),
+  'stock:moves': z.object({
+    warehouseId: id.optional(),
+    itemId: id.optional(),
+    dateFrom: isoDate.optional(),
+    dateTo: isoDate.optional(),
+    page: z.number().int().min(1).default(1),
+    pageSize: z.number().int().min(1).max(500).default(100),
+  }),
+  'serial:trace': z.object({ serial: requiredText(64) }),
+  'report:profit': z.object({
+    dateFrom: isoDate,
+    dateTo: isoDate,
+    dimension: z.enum(['day', 'item']).default('day'),
+  }),
+
   // —— 设置（店名、打印抬头等） ——
   'setting:getAll': z.object({}),
   'setting:save': z.object({ values: z.record(z.string().max(64), z.string().max(1000)) }),
@@ -226,6 +251,10 @@ export interface Outputs {
   'doc:post': DocDetail
   'doc:returnable': Returnable
   'doc:findBySerial': { docId: number; docNo: string; lineId: number } | null
+  'stock:list': StockRow[]
+  'stock:moves': Paged<StockMoveRow>
+  'serial:trace': SerialTrace
+  'report:profit': ProfitReport
   'setting:getAll': Record<string, string>
   'setting:save': null
 }
