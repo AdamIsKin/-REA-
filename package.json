@@ -1,0 +1,49 @@
+{
+  "name": "erp-inventory",
+  "productName": "库存管理",
+  "version": "0.1.0",
+  "private": true,
+  "description": "单机库存管理系统（手机及配件门店）",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "build:test": "vite build --config vite.test.config.mts",
+    "test": "npm run build:test && cross-env ELECTRON_RUN_AS_NODE=1 electron --test --test-reporter=spec \"out/tests/**/*.test.mjs\"",
+    "dist": "npm run build && electron-builder --win --config electron-builder.yml"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.2.0",
+    "exceljs": "^4.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.6",
+    "@vitejs/plugin-vue": "^6.0.11",
+    "cross-env": "^10.1.0",
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "element-plus": "^2.14.8",
+    "eslint": "^10.15.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.12.1",
+    "jsbarcode": "^3.12.3",
+    "pinia": "^4.1.0",
+    "prettier": "^3.10.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vite": "^8.3.8",
+    "vue": "^3.5.45",
+    "vue-router": "^5.5.1",
+    "vue-tsc": "^3.3.14"
+  }
+}

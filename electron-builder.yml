@@ -1,0 +1,27 @@
+appId: com.local.erp-inventory
+productName: 库存管理
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/main/**
+  - out/preload/**
+  - out/renderer/**
+  - package.json
+  - '!out/tests/**'
+# better-sqlite3 13 随包附带 Node-API 预编译文件，Node 和 Electron 通用，不需要按 Electron 版本重编；
+# 本机也没有 C++ 编译器，打开重编反而会失败（设计文档 12.3）。
+npmRebuild: false
+asarUnpack:
+  # 原生模块不能从 asar 归档里直接加载，必须解包到磁盘。
+  - node_modules/better-sqlite3/**
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  shortcutName: 库存管理
