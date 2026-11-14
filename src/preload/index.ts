@@ -16,6 +16,7 @@ const api: PreloadApi = {
     printToPdf: (req) => ipcRenderer.invoke('shell:printToPdf', req),
     openPath: (path) => ipcRenderer.invoke('shell:openPath', path),
     relaunch: () => ipcRenderer.invoke('shell:relaunch'),
+    saveBase64: (opts) => ipcRenderer.invoke('shell:saveBase64', opts),
   },
 }
 

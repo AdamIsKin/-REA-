@@ -11,8 +11,6 @@ declare module 'vue-router' {
   }
 }
 
-const placeholder = () => import('./views/PlaceholderView.vue')
-
 const routes: RouteRecordRaw[] = [
   { path: '/login', component: () => import('./views/LoginView.vue'), meta: { public: true, title: '登录' } },
   {
@@ -44,8 +42,16 @@ const routes: RouteRecordRaw[] = [
         component: () => import('./views/report/ProfitView.vue'),
         meta: { title: '毛利报表', owner: true },
       },
-      { path: 'backup', component: placeholder, meta: { title: '备份与恢复', owner: true, ready: false } },
-      { path: 'oplog', component: placeholder, meta: { title: '操作日志', owner: true, ready: false } },
+      {
+        path: 'backup',
+        component: () => import('./views/system/BackupView.vue'),
+        meta: { title: '备份与恢复', owner: true },
+      },
+      {
+        path: 'oplog',
+        component: () => import('./views/system/OplogView.vue'),
+        meta: { title: '操作日志', owner: true },
+      },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/stock' },

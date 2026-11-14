@@ -217,6 +217,17 @@ export const schemas = {
     dateTo: isoDate,
     dimension: z.enum(['day', 'item']).default('day'),
   }),
+  // —— 备份 ——
+  /** filePath 可选：有则 VACUUM INTO 该路径（另存）；无则写入 dataDir/backups。 */
+  'backup:create': z.object({ filePath: text(500).optional() }),
+  'backup:list': z.object({}),
+  'backup:restore': z.object({ filePath: requiredText(500) }),
+
+  // —— 操作日志 ——
+  'oplog:list': z.object({
+    page: z.number().int().min(1).default(1),
+    pageSize: z.number().int().min(1).max(200).default(50),
+  }),
 
   // —— 设置（店名、打印抬头等） ——
   'setting:getAll': z.object({}),
@@ -255,6 +266,17 @@ export interface Outputs {
   'stock:moves': Paged<StockMoveRow>
   'serial:trace': SerialTrace
   'report:profit': ProfitReport
+  'backup:create': { filePath: string }
+  'backup:list': { name: string; path: string; size: number; mtime: string }[]
+  'backup:restore': { ok: true }
+  'oplog:list': Paged<{
+    id: number
+    userName: string
+    action: string
+    detail: string
+    createdAt: string
+    docId: number | null
+  }>
   'setting:getAll': Record<string, string>
   'setting:save': null
 }

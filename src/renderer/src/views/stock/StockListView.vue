@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import type { StockRow, WarehouseRow } from '@shared/dto'
+import { formatCents } from '@shared/money'
 import { call } from '../../api'
+import { showError } from '../../api/errors'
+import { exportExcel } from '../../export/excel'
 import { useSessionStore } from '../../stores/session'
 import { yuan } from '../../utils/format'
 
@@ -12,6 +15,29 @@ const query = reactive({ warehouseId: undefined as number | undefined, keyword: 
 
 async function load(): Promise<void> {
   rows.value = await call('stock:list', { ...query })
+}
+
+async function doExport(): Promise<void> {
+  try {
+    await exportExcel({
+      fileName: '库存查询.xlsx',
+      sheetName: '库存',
+      columns: [
+        { header: '仓库', value: (r: StockRow) => r.warehouseName },
+        { header: '编码', value: (r: StockRow) => r.itemCode },
+        { header: '名称', value: (r: StockRow) => r.itemName },
+        { header: '规格', value: (r: StockRow) => r.itemSpec },
+        { header: '单位', value: (r: StockRow) => r.unit },
+        { header: '数量', value: (r: StockRow) => r.qty },
+        ...(session.isOwner
+          ? [{ header: '库存金额', value: (r: StockRow) => (r.amount == null ? '' : formatCents(r.amount)) }]
+          : []),
+      ],
+      rows: rows.value,
+    })
+  } catch (e) {
+    showError(e)
+  }
 }
 
 onMounted(async () => {
@@ -29,6 +55,8 @@ onMounted(async () => {
       <el-input v-model="query.keyword" placeholder="商品" clearable style="width: 200px" @keyup.enter="load" @clear="load" />
       <el-checkbox v-model="query.onlyPositive" @change="load">仅显示有库存</el-checkbox>
       <el-button @click="load">查询</el-button>
+      <span class="spacer" />
+      <el-button @click="doExport">导出 Excel</el-button>
     </div>
     <el-table :data="rows" border stripe height="100%">
       <el-table-column prop="warehouseName" label="仓库" width="120" />

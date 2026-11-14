@@ -2,12 +2,16 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { ItemRow } from '@shared/dto'
-import { call } from '../../api'
+import { formatCents } from '@shared/money'
+import { call, shellApi } from '../../api'
 import { showError } from '../../api/errors'
+import { exportExcel } from '../../export/excel'
+import { buildBarcodeLabelsHtml } from '../../print/barcodeHtml'
 import { toYuanInput, yuan } from '../../utils/format'
 
 const rows = ref<ItemRow[]>([])
 const total = ref(0)
+const selected = ref<ItemRow[]>([])
 const query = reactive({ keyword: '', includeDisabled: false, page: 1, pageSize: 50 })
 
 const emptyForm = () => ({
@@ -67,6 +71,59 @@ async function save(): Promise<void> {
   }
 }
 
+async function doExport(): Promise<void> {
+  try {
+    await exportExcel({
+      fileName: '商品资料.xlsx',
+      sheetName: '商品',
+      columns: [
+        { header: '编码', value: (r) => r.code },
+        { header: '名称', value: (r) => r.name },
+        { header: '规格', value: (r) => r.spec },
+        { header: '单位', value: (r) => r.unit },
+        { header: '条码', value: (r) => r.barcode ?? '' },
+        { header: '品牌', value: (r) => r.brand },
+        { header: '类别', value: (r) => r.category },
+        { header: '串号管理', value: (r) => (r.serialManaged ? '是' : '否') },
+        { header: '默认进价', value: (r) => formatCents(r.defaultBuyPrice) },
+        { header: '默认售价', value: (r) => formatCents(r.defaultSellPrice) },
+        { header: '状态', value: (r) => (r.enabled ? '启用' : '停用') },
+      ],
+      rows: rows.value,
+    })
+  } catch (e) {
+    showError(e)
+  }
+}
+
+function onSelect(v: ItemRow[]): void {
+  selected.value = v
+}
+
+async function printLabels(): Promise<void> {
+  const list = selected.value.length > 0 ? selected.value : rows.value
+  if (list.length === 0) {
+    ElMessage.warning('没有可打印的商品')
+    return
+  }
+  try {
+    const html = buildBarcodeLabelsHtml(
+      list.map((i) => ({
+        code: (i.barcode && i.barcode.trim()) || i.code,
+        name: i.name,
+        priceText: formatCents(i.defaultSellPrice),
+      })),
+    )
+    const r = await shellApi().print({
+      html,
+      pageSize: { width: 40, height: 30 },
+    })
+    if (!r.ok) ElMessage.error(r.error || '打印失败')
+  } catch (e) {
+    showError(e)
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -84,9 +141,12 @@ onMounted(load)
       <el-button @click="search">查询</el-button>
       <el-checkbox v-model="query.includeDisabled" @change="search">显示停用</el-checkbox>
       <span class="spacer" />
+      <el-button @click="doExport">导出 Excel</el-button>
+      <el-button @click="printLabels">打印条码标签</el-button>
       <el-button type="primary" @click="edit()">新增商品</el-button>
     </div>
-    <el-table :data="rows" border stripe height="100%">
+    <el-table :data="rows" border stripe height="100%" @selection-change="onSelect">
+      <el-table-column type="selection" width="42" />
       <el-table-column prop="code" label="编码" width="120" />
       <el-table-column prop="name" label="名称" min-width="160" />
       <el-table-column prop="spec" label="规格" width="120" />

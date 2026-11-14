@@ -11,3 +11,19 @@ declare module 'element-plus/es/locale/lang/zh-cn' {
   const locale: import('element-plus/es/locale').Language
   export default locale
 }
+
+declare module 'jsbarcode' {
+  interface JsBarcodeOptions {
+    format?: string
+    displayValue?: boolean
+    margin?: number
+    width?: number
+    height?: number
+  }
+  function JsBarcode(
+    element: SVGElement | HTMLCanvasElement | string,
+    data: string,
+    options?: JsBarcodeOptions,
+  ): void
+  export default JsBarcode
+}

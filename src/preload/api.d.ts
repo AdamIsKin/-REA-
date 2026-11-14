@@ -24,6 +24,11 @@ export interface PreloadApi {
     printToPdf(req: PrintRequest & { defaultPath?: string }): Promise<string | null>
     openPath(path: string): Promise<string>
     relaunch(): Promise<void>
+    saveBase64(opts: {
+      defaultPath?: string
+      filters?: FileFilter[]
+      base64: string
+    }): Promise<string | null>
   }
 }
 

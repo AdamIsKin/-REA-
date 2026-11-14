@@ -2,6 +2,8 @@
 import { onMounted, reactive, ref } from 'vue'
 import { DOC_TYPE_LABEL, type StockMoveRow, type WarehouseRow } from '@shared/dto'
 import { call } from '../../api'
+import { showError } from '../../api/errors'
+import { exportExcel } from '../../export/excel'
 import { today } from '../../utils/format'
 
 const rows = ref<StockMoveRow[]>([])
@@ -27,6 +29,27 @@ async function load(): Promise<void> {
   total.value = r.total
 }
 
+async function doExport(): Promise<void> {
+  try {
+    await exportExcel({
+      fileName: '库存流水.xlsx',
+      sheetName: '流水',
+      columns: [
+        { header: '日期', value: (r) => r.bizDate },
+        { header: '单号', value: (r) => r.docNo },
+        { header: '类型', value: (r) => DOC_TYPE_LABEL[r.docType as keyof typeof DOC_TYPE_LABEL] },
+        { header: '仓库', value: (r) => r.warehouseName },
+        { header: '编码', value: (r) => r.itemCode },
+        { header: '商品', value: (r) => r.itemName },
+        { header: '数量', value: (r) => r.qty },
+      ],
+      rows: rows.value,
+    })
+  } catch (e) {
+    showError(e)
+  }
+}
+
 onMounted(async () => {
   warehouses.value = await call('warehouse:list', {})
   await load()
@@ -42,6 +65,8 @@ onMounted(async () => {
       <el-date-picker v-model="query.dateFrom" type="date" value-format="YYYY-MM-DD" placeholder="起" />
       <el-date-picker v-model="query.dateTo" type="date" value-format="YYYY-MM-DD" placeholder="止" />
       <el-button @click="load">查询</el-button>
+      <span class="spacer" />
+      <el-button @click="doExport">导出 Excel</el-button>
     </div>
     <el-table :data="rows" border stripe height="100%">
       <el-table-column prop="bizDate" label="日期" width="110" />

@@ -12,8 +12,10 @@ import {
   type ReturnableLine,
   type WarehouseRow,
 } from '@shared/dto'
-import { call } from '../../api'
+import { call, shellApi } from '../../api'
 import { showError } from '../../api/errors'
+import { buildDocPrintHtml } from '../../print/docHtml'
+import { loadShopPrintInfo } from '../../print/shop'
 import { useSessionStore } from '../../stores/session'
 import { disableFuture, today, toYuanInput, yuan } from '../../utils/format'
 
@@ -294,6 +296,28 @@ async function doUnpost(): Promise<void> {
   }
 }
 
+/** 已保存单据才能打印：需要完整 DocDetail（含单号、行成本隐藏字段等）。 */
+async function printDoc(asPdf: boolean): Promise<void> {
+  if (!form.id) {
+    ElMessage.warning('请先保存单据')
+    return
+  }
+  try {
+    const doc = await call('doc:get', { id: form.id })
+    const shop = await loadShopPrintInfo()
+    const html = buildDocPrintHtml(doc, shop)
+    if (asPdf) {
+      const path = await shellApi().printToPdf({ html, defaultPath: `${doc.docNo}.pdf` })
+      if (path) ElMessage.success(`已保存 PDF：${path}`)
+    } else {
+      const r = await shellApi().print({ html })
+      if (!r.ok) ElMessage.error(r.error || '打印失败')
+    }
+  } catch (e) {
+    showError(e)
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -302,6 +326,8 @@ onMounted(load)
     <div class="toolbar">
       <el-button @click="router.push(`/docs/${docType}`)">返回列表</el-button>
       <span class="spacer" />
+      <el-button v-if="form.id" @click="printDoc(false)">打印</el-button>
+      <el-button v-if="form.id" @click="printDoc(true)">导出 PDF</el-button>
       <el-button v-if="readOnlyPosted && session.isOwner" type="warning" @click="doUnpost">反过账</el-button>
       <el-button v-if="!readOnlyPosted || form.status === 'draft'" type="primary" :loading="saving" @click="save">
         保存并过账

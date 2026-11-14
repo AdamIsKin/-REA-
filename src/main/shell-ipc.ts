@@ -94,4 +94,20 @@ export function registerShellIpc(getWindow: () => BrowserWindow | null): void {
     app.relaunch()
     app.quit()
   })
+
+  /** 页面导出 Excel 等：先弹另存对话框，再把 base64 写入文件。 */
+  ipcMain.handle(
+    'shell:saveBase64',
+    async (_e, opts: { defaultPath?: string; filters?: FileFilter[]; base64: string }) => {
+      const win = getWindow()
+      const dialogOpts = {
+        defaultPath: opts.defaultPath,
+        filters: opts.filters ?? [{ name: 'All', extensions: ['*'] }],
+      }
+      const r = win ? await dialog.showSaveDialog(win, dialogOpts) : await dialog.showSaveDialog(dialogOpts)
+      if (r.canceled || !r.filePath) return null
+      await writeFile(r.filePath, Buffer.from(opts.base64, 'base64'))
+      return r.filePath
+    },
+  )
 }

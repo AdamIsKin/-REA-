@@ -5,6 +5,7 @@ import { createDispatcher, handler, type HandlerMap } from './rpc'
 import { authHandlers } from './auth/handlers'
 import { inventoryHandlers } from './inventory/handlers'
 import { masterdataHandlers } from './masterdata/handlers'
+import { backupHandlers, oplogHandlers } from './backup/handlers'
 import { queryHandlers } from './query/handlers'
 import { currentSchemaVersion } from './db/migrate'
 
@@ -35,6 +36,8 @@ export function createCore(opts: CreateCoreOptions) {
     ...masterdataHandlers,
     ...inventoryHandlers,
     ...queryHandlers,
+    ...backupHandlers,
+    ...oplogHandlers,
   }
 
   return { core, dispatch: createDispatcher(core, handlers) }
