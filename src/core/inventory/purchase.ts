@@ -1,6 +1,5 @@
-import type { PurchaseDetailRow } from '@shared/dto'
+import type { PurchaseDetailRow, PurchaseStatRow } from '@shared/dto'
 import { cents } from '@shared/money'
-import type { DB } from '../db/connection'
 import { defineStatements } from '../db/statements'
 import { inTransaction } from '../db/tx'
 import { ensure } from '../domain/errors'
@@ -9,9 +8,18 @@ import { handler } from '../rpc'
 import { getLine, updateLineRebate } from './repo'
 
 /**
- * 采购入库明细台账与返利预留（R25 / R26）。
- * 按串号展开：一行一个串号，数量按 1 展示金额分摊为行单价（整行 amount/qty 即单价）。
+ * 采购入库明细台账、返利预留与采购统计（R25 / R26 / R27）。
+ * 明细按串号展开；统计按商品 + 单价汇总串号件数。
  */
+
+/** 明细 / 统计共用的筛选条件（已过账采购）。 */
+const purchaseFilter = `d.doc_type = 'PURCHASE' AND d.status = 'posted'
+             AND (@from = '' OR d.biz_date >= @from)
+             AND (@to = '' OR d.biz_date <= @to)
+             AND (@partner = 0 OR d.partner_id = @partner)
+             AND (@wh = 0 OR d.warehouse_id = @wh)
+             AND (@kw = '' OR d.doc_no LIKE @like ESCAPE '\\' OR i.code LIKE @like ESCAPE '\\'
+                  OR i.name LIKE @like ESCAPE '\\' OR s.serial LIKE @like ESCAPE '\\')`
 
 const sql = defineStatements({
   detail: `SELECT d.biz_date, d.id AS doc_id, d.doc_no, d.created_at, d.updated_at,
@@ -23,8 +31,8 @@ const sql = defineStatements({
                   l.id AS line_id, l.qty AS line_qty, l.unit_price, l.amount AS line_amount,
                   l.rebate_per_unit, l.rebate_amount,
                   s.serial,
-                  COALESCE(cu.display_name, cu.username, '') AS created_by_name,
-                  COALESCE(uu.display_name, uu.username, '') AS updated_by_name
+                  COALESCE(NULLIF(cu.display_name, ''), cu.username, '') AS created_by_name,
+                  COALESCE(NULLIF(uu.display_name, ''), uu.username, '') AS updated_by_name
            FROM doc_line_serial s
            JOIN doc_line l ON l.id = s.line_id
            JOIN doc d ON d.id = l.doc_id
@@ -35,13 +43,7 @@ const sql = defineStatements({
            LEFT JOIN item_brand b ON b.id = i.brand_id
            LEFT JOIN user cu ON cu.id = d.created_by
            LEFT JOIN user uu ON uu.id = d.updated_by
-           WHERE d.doc_type = 'PURCHASE' AND d.status = 'posted'
-             AND (@from = '' OR d.biz_date >= @from)
-             AND (@to = '' OR d.biz_date <= @to)
-             AND (@partner = 0 OR d.partner_id = @partner)
-             AND (@wh = 0 OR d.warehouse_id = @wh)
-             AND (@kw = '' OR d.doc_no LIKE @like ESCAPE '\\' OR i.code LIKE @like ESCAPE '\\'
-                  OR i.name LIKE @like ESCAPE '\\' OR s.serial LIKE @like ESCAPE '\\')
+           WHERE ${purchaseFilter}
            ORDER BY d.biz_date DESC, d.id DESC, l.line_no, s.serial
            LIMIT @limit OFFSET @offset`,
   detailCount: `SELECT COUNT(*) AS n
@@ -49,28 +51,44 @@ const sql = defineStatements({
                 JOIN doc_line l ON l.id = s.line_id
                 JOIN doc d ON d.id = l.doc_id
                 JOIN item i ON i.id = l.item_id
-                WHERE d.doc_type = 'PURCHASE' AND d.status = 'posted'
-                  AND (@from = '' OR d.biz_date >= @from)
-                  AND (@to = '' OR d.biz_date <= @to)
-                  AND (@partner = 0 OR d.partner_id = @partner)
-                  AND (@wh = 0 OR d.warehouse_id = @wh)
-                  AND (@kw = '' OR d.doc_no LIKE @like ESCAPE '\\' OR i.code LIKE @like ESCAPE '\\'
-                       OR i.name LIKE @like ESCAPE '\\' OR s.serial LIKE @like ESCAPE '\\')`,
+                WHERE ${purchaseFilter}`,
+  /** R27：一行一串号计数；金额 = 件数 × 单价。 */
+  stat: `SELECT i.name AS item_name, l.unit_price AS unit_price,
+                COUNT(*) AS qty, SUM(l.unit_price) AS amount
+         FROM doc_line_serial s
+         JOIN doc_line l ON l.id = s.line_id
+         JOIN doc d ON d.id = l.doc_id
+         JOIN item i ON i.id = l.item_id
+         WHERE ${purchaseFilter}
+         GROUP BY i.id, i.name, l.unit_price
+         ORDER BY i.name COLLATE NOCASE, l.unit_price`,
   lineDocType: `SELECT d.doc_type, d.status FROM doc_line l JOIN doc d ON d.id = l.doc_id WHERE l.id = ?`,
 })
 
 const likePattern = (kw: string): string => `%${kw.replace(/[\\%_]/g, (c) => '\\' + c)}%`
 
+function filterParams(input: {
+  keyword: string
+  dateFrom?: string
+  dateTo?: string
+  partnerId?: number
+  warehouseId?: number
+}): Record<string, string | number> {
+  return {
+    from: input.dateFrom ?? '',
+    to: input.dateTo ?? '',
+    partner: input.partnerId ?? 0,
+    wh: input.warehouseId ?? 0,
+    kw: input.keyword,
+    like: likePattern(input.keyword),
+  }
+}
+
 export const purchaseHandlers = {
   'purchase:detailList': handler('purchase:detailList', 'user', (ctx, input) => {
     const db = ctx.core.db
     const p = {
-      from: input.dateFrom ?? '',
-      to: input.dateTo ?? '',
-      partner: input.partnerId ?? 0,
-      wh: input.warehouseId ?? 0,
-      kw: input.keyword,
-      like: likePattern(input.keyword),
+      ...filterParams(input),
       limit: input.pageSize,
       offset: (input.page - 1) * input.pageSize,
     }
@@ -146,5 +164,21 @@ export const purchaseHandlers = {
       )
     })
     return null
+  }),
+
+  'purchase:statList': handler('purchase:statList', 'user', (ctx, input) => {
+    const raw = sql(ctx.core.db).stat.all(filterParams(input)) as {
+      item_name: string
+      unit_price: number
+      qty: number
+      amount: number
+    }[]
+    const rows: PurchaseStatRow[] = raw.map((r) => ({
+      itemName: r.item_name,
+      qty: r.qty,
+      unitPrice: cents(r.unit_price),
+      amount: cents(r.amount),
+    }))
+    return rows
   }),
 }

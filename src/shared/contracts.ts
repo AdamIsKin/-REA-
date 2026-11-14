@@ -23,6 +23,7 @@ import type {
   PartnerRow,
   ProfitReport,
   PurchaseDetailRow,
+  PurchaseStatRow,
   Returnable,
   SerialTrace,
   SessionInfo,
@@ -238,6 +239,14 @@ export const schemas = {
     rebatePerUnit: yuanNonNegative,
     rebateAmount: yuanNonNegative,
   }),
+  /** 采购统计（R27）：按商品 + 单价汇总，筛选与明细一致。 */
+  'purchase:statList': z.object({
+    keyword: text(64).default(''),
+    dateFrom: isoDate.optional(),
+    dateTo: isoDate.optional(),
+    partnerId: id.optional(),
+    warehouseId: id.optional(),
+  }),
 
   // —— 查询与报表 ——
   'stock:list': z.object({
@@ -311,6 +320,7 @@ export interface Outputs {
   'doc:findBySerial': { docId: number; docNo: string; lineId: number } | null
   'purchase:detailList': Paged<PurchaseDetailRow>
   'purchase:updateRebate': null
+  'purchase:statList': PurchaseStatRow[]
   'stock:list': StockRow[]
   'stock:moves': Paged<StockMoveRow>
   'serial:trace': SerialTrace

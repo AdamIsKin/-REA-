@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /**
- * 采购入库明细台账（R25）：一行一串号；单号进采购单，串号进串号追溯。
- * 返利预留可改（R26），只写字段不重过账。
+ * 采购入库默认页（R25 / D44）：按串号展开的入库明细台账。
+ * 工具栏提供采购统计（R27）与新增入库明细。
  */
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import type { PartnerRow, PurchaseDetailRow, WarehouseRow } from '@shared/dto'
+import type { PartnerRow, PurchaseDetailRow, PurchaseStatRow, WarehouseRow } from '@shared/dto'
 import { call } from '../../api'
 import { showError } from '../../api/errors'
 import { toYuanInput, yuan } from '../../utils/format'
@@ -18,8 +18,8 @@ const warehouses = ref<WarehouseRow[]>([])
 const partners = ref<PartnerRow[]>([])
 const query = reactive({
   keyword: '',
-  dateFrom: '',
-  dateTo: '',
+  dateFrom: '' as string | null,
+  dateTo: '' as string | null,
   partnerId: undefined as number | undefined,
   warehouseId: undefined as number | undefined,
   page: 1,
@@ -34,18 +34,35 @@ const rebateForm = reactive({
   rebateAmount: '0.00',
 })
 
+const statsOpen = ref(false)
+const statsLoading = ref(false)
+const statsRows = ref<PurchaseStatRow[]>([])
+const statsQuery = reactive({
+  keyword: '',
+  dateFrom: '' as string | null,
+  dateTo: '' as string | null,
+  partnerId: undefined as number | undefined,
+  warehouseId: undefined as number | undefined,
+})
+
 async function loadMeta(): Promise<void> {
   warehouses.value = await call('warehouse:list', {})
   partners.value = await call('partner:list', { kind: 'supplier' })
 }
 
-async function load(): Promise<void> {
-  const r = await call('purchase:detailList', {
+function listFilter() {
+  return {
     keyword: query.keyword,
     dateFrom: query.dateFrom || undefined,
     dateTo: query.dateTo || undefined,
     partnerId: query.partnerId,
     warehouseId: query.warehouseId,
+  }
+}
+
+async function load(): Promise<void> {
+  const r = await call('purchase:detailList', {
+    ...listFilter(),
     page: query.page,
     pageSize: query.pageSize,
   })
@@ -58,6 +75,10 @@ function search(): void {
   void load()
 }
 
+function openNew(): void {
+  void router.push('/docs/PURCHASE/new')
+}
+
 function openDoc(row: PurchaseDetailRow): void {
   void router.push(`/docs/PURCHASE/${row.docId}`)
 }
@@ -67,7 +88,6 @@ function openSerial(row: PurchaseDetailRow): void {
 }
 
 function editRebate(row: PurchaseDetailRow): void {
-  // 台账按串号展开；返利落在整行，保存时按「单台 × 行件数」回写。
   rebateForm.lineId = row.lineId
   rebateForm.lineQty = Math.max(1, row.lineQty)
   rebateForm.rebatePerUnit = toYuanInput(row.rebatePerUnit)
@@ -77,8 +97,8 @@ function editRebate(row: PurchaseDetailRow): void {
 
 function onRebatePerChange(): void {
   const per = Number(rebateForm.rebatePerUnit || 0)
-  const total = Number.isFinite(per) ? per * rebateForm.lineQty : 0
-  rebateForm.rebateAmount = total.toFixed(2)
+  const sum = Number.isFinite(per) ? per * rebateForm.lineQty : 0
+  rebateForm.rebateAmount = sum.toFixed(2)
 }
 
 async function saveRebate(): Promise<void> {
@@ -94,6 +114,36 @@ async function saveRebate(): Promise<void> {
     await load()
   } catch (e) {
     showError(e)
+  }
+}
+
+/** 打开统计：默认带上明细页当前筛选条件。 */
+function openStats(): void {
+  Object.assign(statsQuery, {
+    keyword: query.keyword,
+    dateFrom: query.dateFrom,
+    dateTo: query.dateTo,
+    partnerId: query.partnerId,
+    warehouseId: query.warehouseId,
+  })
+  statsOpen.value = true
+  void loadStats()
+}
+
+async function loadStats(): Promise<void> {
+  statsLoading.value = true
+  try {
+    statsRows.value = await call('purchase:statList', {
+      keyword: statsQuery.keyword,
+      dateFrom: statsQuery.dateFrom || undefined,
+      dateTo: statsQuery.dateTo || undefined,
+      partnerId: statsQuery.partnerId,
+      warehouseId: statsQuery.warehouseId,
+    })
+  } catch (e) {
+    showError(e)
+  } finally {
+    statsLoading.value = false
   }
 }
 
@@ -135,6 +185,9 @@ onMounted(async () => {
         <el-option v-for="w in warehouses" :key="w.id" :label="w.name" :value="w.id" />
       </el-select>
       <el-button type="primary" @click="search">查询</el-button>
+      <span class="spacer" />
+      <el-button type="primary" @click="openStats">采购统计</el-button>
+      <el-button type="primary" @click="openNew">新增入库明细</el-button>
     </div>
 
     <el-table :data="rows" border stripe height="100%">
@@ -203,6 +256,49 @@ onMounted(async () => {
         <el-button type="primary" @click="saveRebate">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="statsOpen" title="采购统计" width="720px" destroy-on-close>
+      <div class="toolbar stats-bar">
+        <el-input
+          v-model="statsQuery.keyword"
+          placeholder="单号 / 商品 / 串号"
+          clearable
+          style="width: 180px"
+          @keyup.enter="loadStats"
+        />
+        <el-date-picker
+          v-model="statsQuery.dateFrom"
+          type="date"
+          value-format="YYYY-MM-DD"
+          placeholder="开始日期"
+          style="width: 140px"
+        />
+        <el-date-picker
+          v-model="statsQuery.dateTo"
+          type="date"
+          value-format="YYYY-MM-DD"
+          placeholder="结束日期"
+          style="width: 140px"
+        />
+        <el-select v-model="statsQuery.partnerId" clearable placeholder="供应商" style="width: 140px">
+          <el-option v-for="p in partners" :key="p.id" :label="p.name" :value="p.id" />
+        </el-select>
+        <el-select v-model="statsQuery.warehouseId" clearable placeholder="仓库" style="width: 120px">
+          <el-option v-for="w in warehouses" :key="w.id" :label="w.name" :value="w.id" />
+        </el-select>
+        <el-button type="primary" :loading="statsLoading" @click="loadStats">查询</el-button>
+      </div>
+      <el-table v-loading="statsLoading" :data="statsRows" border stripe max-height="420">
+        <el-table-column prop="itemName" label="商品名称" min-width="180" />
+        <el-table-column prop="qty" label="数量" width="100" align="right" />
+        <el-table-column label="单价" width="120" align="right">
+          <template #default="{ row }">{{ yuan(row.unitPrice) }}</template>
+        </el-table-column>
+        <el-table-column label="金额" width="120" align="right">
+          <template #default="{ row }">{{ yuan(row.amount) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
@@ -211,5 +307,9 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   padding: 8px 0;
+}
+.stats-bar {
+  margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 </style>

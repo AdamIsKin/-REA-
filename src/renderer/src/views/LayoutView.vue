@@ -23,7 +23,6 @@ const MENU: MenuGroup[] = [
     title: '单据',
     items: [
       { path: '/docs/PURCHASE', title: '采购入库' },
-      { path: '/purchase/details', title: '入库明细' },
       { path: '/docs/SALE', title: '销售出库' },
       { path: '/docs/TRANSFER', title: '移库' },
       { path: '/docs/PURCHASE_RETURN', title: '采购退货' },

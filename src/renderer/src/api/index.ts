@@ -19,8 +19,18 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * D43：IPC 只能传 Structured Clone 可序列化的纯数据。
+ * Vue reactive/ref 的 Proxy（尤其是嵌套的 serials 数组）会导致
+ * `An object could not be cloned.`，请求到不了业务进程。
+ * JSON 往返是最稳妥的深拷贝：丢掉 Proxy，只保留可 JSON 化的值。
+ */
+function toPlain<T>(input: T): T {
+  return JSON.parse(JSON.stringify(input ?? null)) as T
+}
+
 export async function call<C extends Channel>(channel: C, input: InputOf<C>): Promise<OutputOf<C>> {
-  const r = await window.api.invoke(channel, input)
+  const r = await window.api.invoke(channel, toPlain(input))
   if (!r.ok) throw new ApiError(r.error)
   return r.data as OutputOf<C>
 }

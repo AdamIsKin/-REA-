@@ -400,21 +400,21 @@ onMounted(load)
         <el-col :span="6">
           <el-form-item :label="isTransfer ? '调出仓' : '仓库'" required>
             <el-select v-model="form.warehouseId" style="width: 100%">
-              <el-option v-for="w in warehouses" :key="w.id" :label="`${w.code} ${w.name}`" :value="w.id" />
+              <el-option v-for="w in warehouses" :key="w.id" :label="w.name" :value="w.id" />
             </el-select>
           </el-form-item>
         </el-col>
         <el-col v-if="isTransfer" :span="6">
           <el-form-item label="调入仓" required>
             <el-select v-model="form.toWarehouseId" style="width: 100%">
-              <el-option v-for="w in warehouses" :key="w.id" :label="`${w.code} ${w.name}`" :value="w.id" />
+              <el-option v-for="w in warehouses" :key="w.id" :label="w.name" :value="w.id" />
             </el-select>
           </el-form-item>
         </el-col>
         <el-col v-if="!isTransfer" :span="6">
           <el-form-item :label="partnerKind === 'supplier' ? '供应商' : '客户'" required>
             <el-select v-model="form.partnerId" filterable style="width: 100%" :disabled="isReturn">
-              <el-option v-for="p in partners" :key="p.id" :label="`${p.code} ${p.name}`" :value="p.id" />
+              <el-option v-for="p in partners" :key="p.id" :label="p.name" :value="p.id" />
             </el-select>
           </el-form-item>
         </el-col>

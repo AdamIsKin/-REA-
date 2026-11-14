@@ -22,11 +22,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'categories', component: () => import('./views/master/CategoryView.vue'), meta: { title: '商品分类' } },
       { path: 'brands', component: () => import('./views/master/BrandView.vue'), meta: { title: '品牌' } },
       { path: 'warehouses', component: () => import('./views/master/WarehousesView.vue'), meta: { title: '仓库' } },
-      {
-        path: 'purchase/details',
-        component: () => import('./views/docs/PurchaseDetailView.vue'),
-        meta: { title: '入库明细' },
-      },
+      /** 旧「入库明细」路径兼容跳转（D44：采购入库即明细台账）。 */
+      { path: 'purchase/details', redirect: '/docs/PURCHASE' },
       {
         path: 'partners/:kind(supplier|customer)',
         component: () => import('./views/master/PartnersView.vue'),
@@ -40,6 +37,12 @@ const routes: RouteRecordRaw[] = [
       },
       { path: 'password', component: () => import('./views/system/PasswordView.vue'), meta: { title: '修改密码' } },
       { path: 'stock', component: () => import('./views/stock/StockListView.vue'), meta: { title: '库存查询' } },
+      /** D44：采购入库菜单落地明细台账；须写在 docs/:type 之前以免被动态路由抢走。 */
+      {
+        path: 'docs/PURCHASE',
+        component: () => import('./views/docs/PurchaseDetailView.vue'),
+        meta: { title: '采购入库' },
+      },
       { path: 'docs/:type', component: () => import('./views/docs/DocsListView.vue'), meta: { title: '单据' } },
       { path: 'docs/:type/:id', component: () => import('./views/docs/DocEditView.vue'), meta: { title: '单据编辑' } },
       { path: 'serials', component: () => import('./views/stock/SerialTraceView.vue'), meta: { title: '串号追溯' } },

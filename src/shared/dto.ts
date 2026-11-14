@@ -87,6 +87,14 @@ export interface UserOption {
   displayName: string
 }
 
+/** 采购统计一行（R27）：按商品 + 单价汇总。 */
+export interface PurchaseStatRow {
+  itemName: string
+  qty: number
+  unitPrice: Cents
+  amount: Cents
+}
+
 /** 采购入库明细台账一行（按串号展开，R25）。 */
 export interface PurchaseDetailRow {
   bizDate: string

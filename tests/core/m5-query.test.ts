@@ -66,4 +66,11 @@ test('采购入库明细按串号展开；user:options 对店员可用', () => {
   const opts = call(CLERK, 'user:options', {})
   assert.ok(opts.length >= 2)
   assert.ok(opts.every((u) => 'displayName' in u && 'username' in u))
+
+  const stats = call(CLERK, 'purchase:statList', {})
+  assert.equal(stats.length, 1)
+  assert.equal(stats[0]!.itemName, '手机B')
+  assert.equal(stats[0]!.qty, 2)
+  assert.equal(stats[0]!.unitPrice, 10000)
+  assert.equal(stats[0]!.amount, 20000)
 })
