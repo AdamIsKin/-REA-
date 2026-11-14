@@ -3,7 +3,7 @@
  * 采购入库默认页（R25 / D44）：按串号展开的入库明细台账。
  * 工具栏提供采购统计（R27）与新增入库明细。
  */
-import { onMounted, reactive, ref } from 'vue'
+import { onActivated, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { PartnerRow, PurchaseDetailRow, PurchaseStatRow, WarehouseRow } from '@shared/dto'
@@ -150,6 +150,10 @@ async function loadStats(): Promise<void> {
 onMounted(async () => {
   await loadMeta()
   await load()
+})
+/** keep-alive 恢复时刷新筛选下拉（供应商/仓库）。 */
+onActivated(() => {
+  void loadMeta()
 })
 </script>
 

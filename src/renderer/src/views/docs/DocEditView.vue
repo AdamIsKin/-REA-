@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -98,7 +98,7 @@ function emptyLine(): EditLine {
     itemCode: '',
     itemName: '',
     serialManaged: true,
-    qty: 0,
+    qty: 1,
     unitPrice: '0.00',
     costAmount: null,
     rebatePerUnit: '0.00',
@@ -229,13 +229,12 @@ function pickItem(line: EditLine, item: ItemRow | null | undefined): void {
   line.itemId = item.id
   line.itemCode = item.code
   line.itemName = item.name
-  line.serialManaged = true
-  if (!isTransfer.value) {
-    line.unitPrice = toYuanInput(docType.value === 'PURCHASE' ? item.defaultBuyPrice : item.defaultSellPrice)
-  }
+  line.serialManaged = item.serialManaged
+  if (!isTransfer.value) line.unitPrice = '0.00'
   line.serials = []
   line.serialInput = ''
-  syncLineQty(line)
+  if (line.serialManaged) syncLineQty(line)
+  else line.qty = Math.max(1, line.qty)
 }
 
 function fromDetail(d: DocDetail): void {
@@ -253,8 +252,8 @@ function fromDetail(d: DocDetail): void {
     itemId: l.itemId,
     itemCode: l.itemCode,
     itemName: l.itemName,
-    serialManaged: true,
-    qty: l.serials.length || l.qty,
+    serialManaged: l.serialManaged,
+    qty: l.serialManaged ? l.serials.length || l.qty : l.qty,
     unitPrice: toYuanInput(l.unitPrice),
     costAmount: l.costAmount ?? null,
     rebatePerUnit: toYuanInput(l.rebatePerUnit ?? 0),
@@ -293,8 +292,11 @@ async function save(): Promise<void> {
     ElMessage.warning('请选择原单')
     return
   }
-  if (form.lines.length === 0 || form.lines.some((l) => !l.itemId || l.serials.length === 0)) {
-    ElMessage.warning('请完善明细并扫入串号（数量=串号个数）')
+  if (
+    form.lines.length === 0 ||
+    form.lines.some((l) => !l.itemId || (l.serialManaged ? l.serials.length === 0 : l.qty < 1))
+  ) {
+    ElMessage.warning('请完善明细：有串号商品须扫码，无串号商品须填写数量')
     return
   }
   saving.value = true
@@ -310,13 +312,13 @@ async function save(): Promise<void> {
       remark: form.remark,
       lines: form.lines.map((l) => ({
         itemId: l.itemId!,
-        qty: l.serials.length,
+        qty: l.serialManaged ? l.serials.length : l.qty,
         unitPrice: l.unitPrice,
         ...(isPurchase.value
           ? { rebatePerUnit: l.rebatePerUnit, rebateAmount: l.rebateAmount }
           : {}),
         ...(l.refLineId ? { refLineId: l.refLineId } : {}),
-        serials: l.serials,
+        serials: l.serialManaged ? l.serials : [],
         remark: l.remark,
       })),
     }
@@ -366,6 +368,11 @@ async function printDoc(asPdf: boolean): Promise<void> {
 }
 
 onMounted(load)
+/** keep-alive 恢复时重拉仓库/供应商/录入人，避免主数据新增后下拉仍是旧列表。 */
+onActivated(() => {
+  if (!loaded.value) return
+  void loadMeta()
+})
 </script>
 
 <template>
@@ -478,10 +485,10 @@ onMounted(load)
     </div>
 
     <el-table :data="form.lines" border style="width: 100%">
-      <el-table-column label="商品" min-width="200">
+      <el-table-column label="商品全称" min-width="200">
         <template #default="{ row }">
           <template v-if="isReturn || !canEdit">
-            {{ row.itemCode }} {{ row.itemName }}
+            {{ row.itemName }}
           </template>
           <el-select
             v-else
@@ -492,17 +499,27 @@ onMounted(load)
             style="width: 100%"
             @change="(id: number) => pickItem(row, itemOptions.find((i) => i.id === id) ?? null)"
           >
-            <el-option v-for="i in itemOptions" :key="i.id" :label="`${i.code} ${i.name}`" :value="i.id" />
+            <el-option v-for="i in itemOptions" :key="i.id" :label="i.name" :value="i.id" />
             <el-option
               v-if="row.itemId && !itemOptions.some((i) => i.id === row.itemId)"
-              :label="`${row.itemCode} ${row.itemName}`"
+              :label="row.itemName"
               :value="row.itemId"
             />
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column label="数量" width="90" align="right">
-        <template #default="{ row }">{{ row.qty }}</template>
+      <el-table-column label="数量" width="100">
+        <template #default="{ row }">
+          <el-input-number
+            v-if="!row.serialManaged"
+            v-model="row.qty"
+            :min="1"
+            :disabled="!canEdit"
+            controls-position="right"
+            style="width: 100%"
+          />
+          <span v-else>{{ row.qty }}</span>
+        </template>
       </el-table-column>
       <el-table-column v-if="!isTransfer" label="单价" width="110">
         <template #default="{ row }">
@@ -527,6 +544,7 @@ onMounted(load)
       <el-table-column label="串号" min-width="220">
         <template #default="{ row, $index }">
           <div
+            v-if="row.serialManaged"
             class="serial-cell"
             :class="{ clickable: canEdit }"
             @click="openScan($index)"
@@ -536,6 +554,7 @@ onMounted(load)
             </template>
             <span v-else class="muted">{{ canEdit ? '点击扫串号' : '—' }}</span>
           </div>
+          <span v-else class="muted">—</span>
         </template>
       </el-table-column>
       <el-table-column v-if="session.isOwner" label="成本" width="100" align="right">
@@ -550,7 +569,7 @@ onMounted(load)
 
     <SerialScanDialog
       v-model="scanOpen"
-      :item-name="scanLine ? `${scanLine.itemCode} ${scanLine.itemName}` : ''"
+      :item-name="scanLine?.itemName ?? ''"
       :unit-price-text="scanLine?.unitPrice ?? '0.00'"
       :initial-serials="scanLine?.serials ?? []"
       @confirm="onScanConfirm"

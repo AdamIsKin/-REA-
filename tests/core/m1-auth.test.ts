@@ -4,7 +4,7 @@ import { CLERK, OWNER, setup } from './helpers'
 
 test('迁移后 schema 版本为最新，外键开启', () => {
   const { db } = setup()
-  assert.equal(db.pragma('user_version', { simple: true }), 2)
+  assert.equal(db.pragma('user_version', { simple: true }), 3)
   assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
 })
 
@@ -33,24 +33,16 @@ test('店员维护基础资料成功并写入操作日志（D26）', () => {
   assert.deepEqual(JSON.parse(logs[1]!.detail).changes, { name: ['门店', '门店仓'] })
 })
 
-test('商品编码重复返回 CODE_DUPLICATE；金额按元字符串解析为分', () => {
+test('商品保存生成内部编码；默认单串号', () => {
   const { call, fail } = setup()
   const item = call(OWNER, 'item:save', {
-    code: 'A1',
-    name: '手机线',
-    defaultBuyPrice: '1',
-    defaultSellPrice: '19.9',
+    name: '荣耀100Pro',
+    serialType: 'single',
   })
-  assert.equal(item.defaultBuyPrice, 100)
-  assert.equal(item.defaultSellPrice, 1990)
+  assert.equal(item.name, '荣耀100Pro')
   assert.equal(item.serialManaged, true)
-  const e = fail(OWNER, 'item:save', {
-    code: 'A1',
-    name: 'x',
-    defaultBuyPrice: '0',
-    defaultSellPrice: '0',
-  })
-  assert.equal(e.code, 'CODE_DUPLICATE')
+  assert.equal(item.serialType, 'single')
+  assert.ok(item.code.length > 0)
 })
 
 test('至少保留一个启用的老板账号', () => {

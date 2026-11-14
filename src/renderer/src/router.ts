@@ -19,9 +19,10 @@ const routes: RouteRecordRaw[] = [
     redirect: '/stock',
     children: [
       { path: 'items', component: () => import('./views/master/ItemsView.vue'), meta: { title: '商品' } },
-      { path: 'categories', component: () => import('./views/master/CategoryView.vue'), meta: { title: '商品分类' } },
-      { path: 'brands', component: () => import('./views/master/BrandView.vue'), meta: { title: '品牌' } },
       { path: 'warehouses', component: () => import('./views/master/WarehousesView.vue'), meta: { title: '仓库' } },
+      /** 旧侧栏入口兼容：分类/品牌已并入商品页按钮（D47）。 */
+      { path: 'categories', redirect: '/items' },
+      { path: 'brands', redirect: '/items' },
       /** 旧「入库明细」路径兼容跳转（D44：采购入库即明细台账）。 */
       { path: 'purchase/details', redirect: '/docs/PURCHASE' },
       {

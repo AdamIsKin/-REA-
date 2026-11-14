@@ -8,10 +8,8 @@ test('库存查询：老板有金额字段，店员没有', () => {
   const wh = call(OWNER, 'warehouse:save', { code: 'W1', name: '仓' })
   const s = call(OWNER, 'partner:save', { kind: 'supplier', code: 'S1', name: '供' })
   const item = call(OWNER, 'item:save', {
-    code: 'A1',
     name: '手机',
-    defaultBuyPrice: '10',
-    defaultSellPrice: '20',
+    serialType: 'single',
   })
   call(OWNER, 'doc:create', {
     docType: 'PURCHASE',
@@ -45,10 +43,8 @@ test('采购入库明细按串号展开；user:options 对店员可用', () => {
   const wh = call(OWNER, 'warehouse:save', { code: 'W1', name: '仓' })
   const s = call(OWNER, 'partner:save', { kind: 'supplier', code: 'S1', name: '供' })
   const item = call(OWNER, 'item:save', {
-    code: 'B1',
     name: '手机B',
-    defaultBuyPrice: '100',
-    defaultSellPrice: '200',
+    serialType: 'single',
   })
   call(OWNER, 'doc:create', {
     docType: 'PURCHASE',

@@ -167,19 +167,22 @@ export const schemas = {
   'item:lookup': z.object({ code: requiredText(64) }),
   'item:save': z.object({
     id: id.optional(),
-    code,
     name: requiredText(128),
-    spec: text(128).default(''),
-    unit: text(16).default('件'),
-    barcode: text(64)
-      .default('')
-      .transform((s) => (s === '' ? null : s)),
     categoryId: id.nullable().optional(),
     brandId: id.nullable().optional(),
-    defaultBuyPrice: yuanNonNegative,
-    defaultSellPrice: yuanNonNegative,
-    remark: text(255).default(''),
-    enabled: z.boolean().default(true),
+    series: text(64).default(''),
+    memory1: text(64).default(''),
+    memory2: text(64).default(''),
+    version: text(64).default(''),
+    model: text(64).default(''),
+    color: text(64).default(''),
+    supplierId: id.nullable().optional(),
+    serialType: z.enum(['none', 'single', 'dual']).default('single'),
+    stockMin: z.number().int().min(0).default(0),
+    stockMax: z.number().int().min(0).default(0),
+    isConsignment: z.boolean().default(false),
+    isQuotable: z.boolean().default(true),
+    createdByUserId: id.optional(),
   }),
 
   'partner:list': z.object({

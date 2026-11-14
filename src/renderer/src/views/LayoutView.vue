@@ -45,8 +45,6 @@ const MENU: MenuGroup[] = [
     title: '基础资料',
     items: [
       { path: '/items', title: '商品' },
-      { path: '/categories', title: '商品分类' },
-      { path: '/brands', title: '品牌' },
       { path: '/warehouses', title: '仓库' },
       { path: '/partners/supplier', title: '供应商' },
       { path: '/partners/customer', title: '客户' },

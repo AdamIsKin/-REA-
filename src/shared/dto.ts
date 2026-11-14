@@ -61,23 +61,40 @@ export interface BrandRow {
   enabled: boolean
 }
 
+/** 商品串号类型（R23）：dual 仅占位，当前过账按 single 处理。 */
+export type SerialType = 'none' | 'single' | 'dual'
+
 export interface ItemRow {
   id: number
+  /** 内部编码，页面不展示。 */
   code: string
+  /** 商品全称。 */
   name: string
-  spec: string
-  unit: string
-  barcode: string | null
   categoryId: number | null
   categoryName: string
   brandId: number | null
   brandName: string
-  /** 固定为 true（R23）；字段保留便于页面兼容。 */
+  series: string
+  memory1: string
+  memory2: string
+  version: string
+  model: string
+  color: string
+  supplierId: number | null
+  supplierName: string
+  serialType: SerialType
+  /** 由 serialType 派生：none→false，其余→true。 */
   serialManaged: boolean
-  defaultBuyPrice: Cents
-  defaultSellPrice: Cents
-  remark: string
-  enabled: boolean
+  stockMin: number
+  stockMax: number
+  isConsignment: boolean
+  isQuotable: boolean
+  createdBy: number | null
+  createdByName: string
+  updatedBy: number | null
+  updatedByName: string
+  createdAt: string
+  updatedAt: string
 }
 
 /** 录入人下拉（R24）；不含密码与权限细节。 */

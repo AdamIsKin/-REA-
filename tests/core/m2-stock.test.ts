@@ -9,10 +9,8 @@ function seed(env: TestEnv) {
   const supplier = call(OWNER, 'partner:save', { kind: 'supplier', code: 'S1', name: '供应商A' })
   const customer = call(OWNER, 'partner:save', { kind: 'customer', code: 'C1', name: '客户A' })
   const item = call(OWNER, 'item:save', {
-    code: 'P1',
     name: '手机X',
-    defaultBuyPrice: '100',
-    defaultSellPrice: '199',
+    serialType: 'single',
   })
   return { wh, supplier, customer, item }
 }

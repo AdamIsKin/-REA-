@@ -11,7 +11,7 @@ import type { HeaderWrite, LineWrite } from './repo'
  */
 
 const sql = defineStatements({
-  item: 'SELECT id, code, name, serial_managed, enabled FROM item WHERE id = ?',
+  item: 'SELECT id, code, name, serial_managed, serial_type, enabled FROM item WHERE id = ?',
   warehouse: 'SELECT id, enabled FROM warehouse WHERE id = ?',
   partner: 'SELECT id, kind, enabled FROM partner WHERE id = ?',
   userEnabled: 'SELECT id FROM user WHERE id = ? AND enabled = 1',
@@ -35,6 +35,7 @@ interface ItemInfo {
   code: string
   name: string
   serial_managed: number
+  serial_type: 'none' | 'single' | 'dual'
   enabled: number
 }
 
@@ -53,7 +54,11 @@ function requireWarehouse(db: DB, id: number, field: string): void {
   ensure(wh.enabled === 1, 'VALIDATION_FAILED', { field }, '仓库已停用')
 }
 
-/** R23：全部商品必须按串号管理，数量只能等于串号个数。 */
+/**
+ * R23：按 serial_type 校验。
+ * - none：禁止串号，数量手填；
+ * - single / dual：串号个数须等于数量（dual 暂与 single 相同，双串规则第二版再定）。
+ */
 function checkSerials(
   item: ItemInfo,
   lineNo: number,
@@ -61,7 +66,12 @@ function checkSerials(
   serials: string[],
   seen: Set<string>,
 ): void {
-  ensure(item.serial_managed === 1, 'VALIDATION_FAILED', { lineNo, itemCode: item.code }, '全部商品须按串号管理')
+  const type = item.serial_type ?? (item.serial_managed === 1 ? 'single' : 'none')
+  if (type === 'none') {
+    ensure(serials.length === 0, 'VALIDATION_FAILED', { lineNo }, '无串号商品不能填写串号')
+    ensure(qty > 0, 'VALIDATION_FAILED', { lineNo }, '数量必须大于 0')
+    return
+  }
   if (serials.length !== qty) {
     throw new BizError('SERIAL_COUNT_MISMATCH', { lineNo, qty, count: serials.length, itemCode: item.code })
   }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onActivated, onMounted, reactive, ref } from 'vue'
 import type { StockRow, WarehouseRow } from '@shared/dto'
 import { formatCents } from '@shared/money'
 import { call } from '../../api'
@@ -61,6 +61,11 @@ async function doExport(): Promise<void> {
 onMounted(async () => {
   warehouses.value = await call('warehouse:list', {})
   await load()
+})
+onActivated(() => {
+  void call('warehouse:list', {}).then((list) => {
+    warehouses.value = list
+  })
 })
 </script>
 
